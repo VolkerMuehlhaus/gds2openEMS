@@ -40,7 +40,7 @@ Document version: 2026-09-02 (v3)
 
 ## What's New
 
-This chapter gives a brief overview of major changes since the previous edition (v2, March 2025) of this guide. For the complete, dated change log, see [`CHANGES.md`](https://github.com/VolkerMuehlhaus/openems_ihp_sg13g2/blob/main/doc/CHANGES.md) in the repository.
+This chapter gives a brief overview of major changes since the previous edition (v2, March 2025) of this guide. For the complete, dated change log, see [`CHANGES.md`](https://github.com/VolkerMuehlhaus/gds2openEMS/blob/main/doc/CHANGES.md) in the repository.
 
 - One major change is that documentation and examples now **install gds2openEMS as a module from PyPi** (pip install gds2openEMS), instead of the local copy of the modules folder used before. The old method with local copy still works, but the new method using Python module installation is more convenient.
 

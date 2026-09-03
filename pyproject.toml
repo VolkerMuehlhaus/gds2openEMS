@@ -22,8 +22,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/VolkerMuehlhaus/openems_ihp_sg13g2"
-Repository = "https://github.com/VolkerMuehlhaus/openems_ihp_sg13g2"
+Homepage = "https://github.com/VolkerMuehlhaus/gds2openEMS"
+Repository = "https://github.com/VolkerMuehlhaus/gds2openEMS"
 
 [project.scripts]
 stackupEditor = "stackup_editor.stackupEditor:main"

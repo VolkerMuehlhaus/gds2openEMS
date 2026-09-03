@@ -9,7 +9,7 @@ import re
 import tomllib
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RAW_BASE = "https://raw.githubusercontent.com/VolkerMuehlhaus/openems_ihp_sg13g2/main/"
+RAW_BASE = "https://raw.githubusercontent.com/VolkerMuehlhaus/gds2openEMS/main/"
 
 def rewrite_relative_links(text):
     def replace(match):
