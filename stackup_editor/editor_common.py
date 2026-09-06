@@ -44,9 +44,12 @@ using the nearest two points beyond either end) without adding a new dependency.
 """
 
 import numpy as np
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import (
+    QWidget, QFrame, QGraphicsView, QGraphicsScene, QGraphicsItem, QGraphicsRectItem,
+    QToolTip,
+)
 from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt, QRect, QRectF, Signal
 
 
 # ---------- STACKUP PREVIEW COLOR/LABEL DEFAULTS (permittivity-based) ------------------
@@ -133,8 +136,448 @@ class _LinearInterpExtrapolate:
 
 # ---------- POP UP WINDOW TO SHOW STACKUP ------------------
 
-class VectorWidget(QWidget):
-    """This widget actually draws the stackup preview.
+def _build_dielectric_tooltip(dielectric):
+    return (
+        f"{dielectric.name}\n"
+        f"Type: Dielectric\n"
+        f"Material: {dielectric.material}\n"
+        f"Zmin: {dielectric.zmin:.4f} µm\n"
+        f"Zmax: {dielectric.zmax:.4f} µm\n"
+        f"Thickness: {dielectric.thickness:.4f} µm"
+    )
+
+
+def _build_layer_tooltip(metal):
+    lines = [
+        f"{metal.name} (GDSII layer {metal.layernum})",
+        f"Type: {metal.type.capitalize()}",
+        f"Material: {metal.material}",
+        f"Zmin: {metal.zmin:.4f} µm",
+        f"Zmax: {metal.zmax:.4f} µm",
+    ]
+    if not metal.is_sheet:
+        lines.append(f"Thickness: {metal.thickness:.4f} µm")
+    return "\n".join(lines)
+
+
+def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width, height,
+                            dielectric_color_fn, dielectric_label_fn,
+                            metal_label_fn, via_label_suffix_fn):
+    """Pure layout computation for the stackup cross-section preview - no QPainter/
+    widget/scene involved. Returns (draw_calls, interactive_entries):
+
+    draw_calls: an ordered list of (QPainter method name, args) tuples. Replaying them
+    in order (see render_stackup_layout()) reproduces exactly what the previous
+    QWidget/paintEvent-based VectorWidget drew directly - this function is a mechanical
+    move of that drawing code (same loop structure, same schematic layout math: dielectric
+    slab height by metal-level count rather than physical thickness, same-zmin metals split
+    side by side, linear-interpolated via/drawn-dielectric placement, rotating via x-slots),
+    not a re-derivation of it, specifically to avoid subtly changing the visual layout.
+
+    interactive_entries: one {"kind": "dielectric"|"layer", "key": name, "rect": QRectF,
+    "ref": dielectric_layer/metal_layer, "tooltip": str} dict per dielectric slab, metal,
+    or via box - used to build the transparent hoverable/selectable overlay items. "key" is
+    always the element's Name (unique within <Dielectrics>/<Layers> respectively), matching
+    what the stackup editor's row_elements look up by.
+    """
+    draw_calls = []
+    interactive_entries = []
+
+    # utility: flip y to have y=0 at bottom
+    def flipy(y):
+        return height - y
+
+    def setPen(pen):
+        draw_calls.append(("setPen", (pen,)))
+
+    def setBrush(brush):
+        draw_calls.append(("setBrush", (brush,)))
+
+    def drawRect(x, y, w, h):
+        draw_calls.append(("drawRect", (x, y, w, h)))
+
+    def drawLine(x1, y1, x2, y2):
+        draw_calls.append(("drawLine", (x1, y1, x2, y2)))
+
+    def drawTextAt(x, y, text):
+        draw_calls.append(("drawText", (x, y, text)))
+
+    # utility to draw text with alignment on right side
+    def drawText_right(x, y, w, h, text):
+        rect = QRect(x, y - h, w, h)
+        draw_calls.append(("drawText", (rect, Qt.AlignVCenter | Qt.AlignRight, text)))
+
+    def drawText_left(x, y, w, h, text):
+        rect = QRect(x, y - h, w, h)
+        draw_calls.append(("drawText", (rect, Qt.AlignVCenter | Qt.AlignLeft, text)))
+
+    xmin = int(width * 0.02)
+    xmax = int(width * 0.98)
+
+    ymin = int(height * 0.025)
+    ymax = int(height * 0.975)
+
+    penBlack = QPen(Qt.black, 1)
+    penGray = QPen(QColor(134, 132, 130))
+    penDarkGray = QPen(QColor(53, 50, 47))
+
+    # get total dielectric parts, where each metal in a dielectric adds one part
+    dielectric_shapes = []
+    total_parts = 0
+    # sorted by resolved zmin, not just reversed file/array order: a Reference-based
+    # dielectric's actual position comes from resolving its Reference by name (see
+    # dielectric_layers_list.resolve_references()), entirely independent of where it
+    # sits in the file - so reordering it there (e.g. Move Up/Down in the Dielectric
+    # Stack tab) must not change where it's drawn here, even though it does change
+    # dielectrics_list.dielectrics' own array order
+    dielectrics_bottom_up = sorted(dielectrics_list.dielectrics, key=lambda d: d.zmin)
+    for dielectric in dielectrics_bottom_up:  # bottom up
+        setPen(penBlack)
+
+        metals_inside = dielectric.get_planar_metals_inside()
+        # get number of unique zmin values in that list
+        zmin_list = []
+        for metal in metals_inside:
+            if not metal.zmin in zmin_list:
+                zmin_list.append(metal.zmin)
+        metals_count = len(zmin_list)
+
+        # first metal not aligned with dielectric?
+        if len(metals_inside) > 0:
+            if metals_inside[0].zmin > dielectric.zmin:
+                metals_count = metals_count + 0.5
+
+        parts = max(1, metals_count)
+        dielectric_shape = {}
+        dielectric_shape['name'] = dielectric.name
+        dielectric_shape['dielectric'] = dielectric
+        dielectric_shape['numparts'] = parts
+
+        materialname = dielectric.material
+        material = materials_list.get_by_name(materialname)
+        # dielectric color/label are app-specific (permittivity vs. thermal conductivity)
+        dielectric_shape['color'] = dielectric_color_fn(material)
+        dielectric_shape['material'] = material
+
+        total_parts = total_parts + parts
+        dielectric_shapes.append(dielectric_shape)
+
+    # calculate height of one dielectric shape
+    total_parts = max(total_parts, 1)
+    part_height = int((ymax - ymin) / (total_parts))
+
+    y = ymin
+    w = xmax - ymin
+
+    # we need to store data for original z position and the displayed y position
+    stored_z = np.array([0])
+    stored_y = np.array([ymin])
+
+    for dielectric_shape in dielectric_shapes:
+        h = part_height * dielectric_shape['numparts']
+        dielectric = dielectric_shape['dielectric']
+        color = dielectric_shape['color']
+        material = dielectric_shape['material']
+
+        material_string = dielectric_label_fn(dielectric, material)
+
+        setPen(penBlack)
+        setBrush(color)
+        drawRect(xmin, flipy(y), w, -h)
+        interactive_entries.append({
+            "kind": "dielectric",
+            "key": dielectric.name,
+            "rect": QRectF(xmin, flipy(y), w, -h).normalized(),
+            "ref": dielectric,
+            "tooltip": _build_dielectric_tooltip(dielectric),
+        })
+        drawText_left(xmin + 5, flipy(y), w, h, dielectric.name)
+        drawText_right(xmin, flipy(y), w - 5, h, material_string)
+
+        if not dielectric.zmax in stored_z:
+            stored_z = np.append(stored_z, dielectric.zmax)
+            stored_y = np.append(stored_y, y + h)
+
+        # get metals inside this dielectric
+        metals_inside = dielectric.get_planar_metals_inside()
+        # height for one dielectric segment including one metal is part_height
+        if len(metals_inside) > 0:
+
+            # there could be multiple metals starting at the same zmin
+
+            # draw planar metals, one after another
+            ymetal = y
+            for n, metal in enumerate(metals_inside):
+
+                setPen(penBlack)
+
+                # check if metal is aligned with dielectric zmin
+                elevation = metal.zmin - dielectric.zmin
+                if n == 0 and (abs(elevation) > 0.001):
+                    # draw some vertical offset, not aligned with dielectric
+                    ymetal = ymetal + part_height * 0.5  # slight offset
+
+                # check if next metal is at same zmin
+                next_at_same_zmin = False
+                previous_at_same_zmin = False
+                xmetal = xmin + 120
+                wmetal = w - 200
+
+                if n < len(metals_inside) - 1:
+                    next_metal = metals_inside[n + 1]
+                    if abs(next_metal.zmin - metal.zmin) < 0.001:
+                        next_at_same_zmin = True
+                        xmetal = xmin + 120
+                        wmetal = int(w / 2) - 100
+                else:
+                    next_metal = None
+
+                # for the "distance to metal above" label below: several metals
+                # can share this zmin (e.g. sheet resistors drawn side by side),
+                # so skip past all of them to the first one that's actually at a
+                # different (higher) zmin - next_metal above is only the very next
+                # list entry, which for a same-zmin sibling would wrongly give 0
+                next_metal_above = None
+                for candidate in metals_inside[n + 1:]:
+                    if abs(candidate.zmin - metal.zmin) >= 0.001:
+                        next_metal_above = candidate
+                        break
+
+                if n > 0:
+                    previous_metal = metals_inside[n - 1]
+                    if abs(previous_metal.zmin - metal.zmin) < 0.001:
+                        xmetal = xmin + int(w / 2) + 20
+                        wmetal = int(w / 2) - 100
+                        previous_at_same_zmin = True
+
+                material = materials_list.get_by_name(metal.material)
+                if material is not None:
+                    if metal.is_sheet:
+                        # sheet metal that is simulated with zero extrusion
+                        # (named height_box, not height, to avoid shadowing the
+                        # outer "height" parameter that flipy() closes over)
+                        height_box = 3
+                        label_string = metal_label_fn(metal, material, True)
+                    else:
+                        # regular extruded metal
+                        height_box = part_height / 2
+                        label_string = metal_label_fn(metal, material, False)
+
+                    # the box for this metal
+                    if material.type.upper() == "CONDUCTOR":
+                        setBrush(QColor(230, 230, 230, 90))
+                        drawRect(xmetal, flipy(ymetal), wmetal, -int(height_box))
+                    else:
+                        setBrush(QColor(230, 130, 130, 90))
+                        drawRect(xmetal, flipy(ymetal), wmetal, -int(height_box))
+                else:
+                    # material assignment is invalid
+                    height_box = part_height / 2
+                    setBrush(QColor(255, 0, 0, 80))
+                    drawRect(xmetal, flipy(ymetal), wmetal, -int(height_box))
+                    label_string = 'INVALID MATERIAL REFERENCE: ' + metal.material
+
+                interactive_entries.append({
+                    "kind": "layer",
+                    "key": metal.name,
+                    "rect": QRectF(xmetal, flipy(ymetal), wmetal, -int(height_box)).normalized(),
+                    "ref": metal,
+                    "tooltip": _build_layer_tooltip(metal),
+                })
+
+                setPen(penBlack)
+                drawText_left(xmetal + 10, flipy(ymetal), wmetal, part_height / 2, f"{metal.name} ({metal.layernum})")
+                setPen(penGray)
+                drawText_right(xmetal, flipy(ymetal), wmetal - 10, part_height / 2, label_string)
+                # store the drawing position, because vias will refer to that
+                if not metal.zmin in stored_z:
+                    stored_z = np.append(stored_z, metal.zmin)
+                    stored_y = np.append(stored_y, ymetal)
+                if not metal.zmax in stored_z:
+                    stored_z = np.append(stored_z, metal.zmax)
+                    stored_y = np.append(stored_y, ymetal + height_box)
+
+                setPen(penGray)
+                drawLine(xmetal - 60, flipy(ymetal), xmetal - 10, flipy(ymetal))
+                # draw line at top side of metal
+                if not metal.is_sheet:
+                    drawLine(xmetal - 60, flipy(ymetal + height_box), xmetal - 10, flipy(ymetal + height_box))
+                    heightstring = f'{metal.thickness:.3f}µm'
+                    setPen(penDarkGray)
+                    drawText_left(xmetal - 60, flipy(ymetal), 50, height_box, heightstring)
+
+                if not previous_at_same_zmin:
+                    # draw height to metal above
+                    if next_metal_above is not None:
+                        dz = abs(next_metal_above.zmin - metal.zmax)
+                        heightstring = f'{dz:.3f}µm'
+                        setPen(penGray)
+                        # sheet metals draw at height_box=3px, too short to fit this
+                        # label without vertical clipping - give the text its own
+                        # minimum box height, independent of the drawn box height
+                        text_height = max(height_box, 14)
+                        drawText_left(xmetal - 60, flipy(ymetal + height_box), 50, text_height, heightstring)
+
+                if n == len(metals_inside) - 1:
+                    # last metal (top metal)
+                    # place text for distance to dielectric boundary
+
+                    setPen(penBlack)
+                    # a metal is registered "inside" a dielectric by its zmin alone
+                    # (see util_stackup_reader.register_metals_inside()) - its zmax
+                    # can legitimately extend past that dielectric's own zmax into
+                    # the one(s) above (e.g. a thick metal sitting in a very thin
+                    # dielectric slab), which would otherwise show as a negative,
+                    # confusingly-worded "distance to the boundary above". Floor at
+                    # 0 - the metal is still drawn at its correct position/height,
+                    # this only affects this one label.
+                    dz = max(0.0, dielectric.zmax - metal.zmax)
+                    if dz > 10:
+                        heightstring = f'{dz:.1f}µm'
+                    else:
+                        heightstring = f'{dz:.3f}µm'
+                    setPen(penGray)
+                    drawTextAt(xmetal - 60, flipy(ymetal + height_box + 5), heightstring)
+
+                if n == 0 and elevation > 0.001:
+                    # metal not aligned with bottom of dielectric, add a label for offset value
+                    heightstring = f'{elevation:.3f}µm'
+                    setPen(penGray)
+                    drawTextAt(xmetal - 60, flipy(ymetal - 10), heightstring)
+
+                if not next_at_same_zmin:
+                    # increase screen y for next metal
+                    ymetal = ymetal + part_height
+
+        y = y + h
+
+    # sort stored positions
+    if len(stored_z) > 2:
+        idx = np.argsort(stored_z)
+        y_sorted = stored_y[idx]
+        z_sorted = stored_z[idx]
+        # linear, not cubic: the z->y mapping is a layout position (screen height
+        # per dielectric is set by how many metals are stacked inside it, not by
+        # its physical thickness), so slope can change drastically between
+        # consecutive stored points - e.g. a thick, metal-free substrate maps to
+        # almost no screen height while a thin, via-packed dielectric maps to a
+        # lot. A cubic spline through data like that readily overshoots (Runge's
+        # phenomenon), and with unbounded extrapolation that overshoot is
+        # unbounded - enough to overflow the int coordinates drawRect() needs
+        # below. Linear interpolation/extrapolation is bounded by construction.
+        z_to_y = _LinearInterpExtrapolate(z_sorted, y_sorted)
+
+        # next we draw the vias, based on the screen position of metals that we have stored
+        # via position alternates between 3 positions along x axis
+        pos = 1
+        w = (xmax - xmin) / 10
+
+        setBrush(QColor(136, 192, 200, 80))
+        for metal in metals_list.metals:
+            if metal.is_via or metal.is_dielectric:
+
+                material = materials_list.get_by_name(metal.material)
+                label_suffix = via_label_suffix_fn(metal, material)
+
+                y1 = z_to_y(metal.zmin)
+                y2 = z_to_y(metal.zmax)
+                h = abs(y2 - y1)
+
+                if pos == 1:
+                    xvia = (xmax + xmin) / 2 - 4 * w / 2
+                    pos = 2
+                elif pos == 2:
+                    xvia = (xmax + xmin) / 2 - w / 2
+                    pos = 3
+                else:
+                    xvia = (xmax + xmin) / 2 + w
+                    pos = 1
+
+                setPen(penBlack)
+                drawRect(xvia, flipy(y1), w, -h)
+                interactive_entries.append({
+                    "kind": "layer",
+                    "key": metal.name,
+                    "rect": QRectF(xvia, flipy(y1), w, -h).normalized(),
+                    "ref": metal,
+                    "tooltip": _build_layer_tooltip(metal),
+                })
+                drawTextAt(xvia + 5, flipy(y1 + 5), f"{metal.name} ({metal.layernum})" + label_suffix)
+
+    return draw_calls, interactive_entries
+
+
+def render_stackup_layout(draw_calls, painter, width, height):
+    """Replays draw_calls (from compute_stackup_layout()) onto painter - the exact
+    same QPainter calls the previous paintEvent()-based VectorWidget made directly."""
+    painter.fillRect(QRectF(0, 0, width, height), Qt.white)
+    painter.setRenderHint(QPainter.Antialiasing)
+    for method_name, args in draw_calls:
+        getattr(painter, method_name)(*args)
+
+
+class StackupBackgroundItem(QGraphicsItem):
+    """Renders the stackup cross-section preview's static visuals (dielectric slabs,
+    metal/via boxes, labels, connector lines) by replaying draw_calls captured by
+    compute_stackup_layout(). Kept separate from InteractiveRegionItem so hover/
+    selection support never has to re-derive any of that layout math.
+    """
+
+    def __init__(self, draw_calls, width, height):
+        super().__init__()
+        self._draw_calls = draw_calls
+        self._width = width
+        self._height = height
+        self.setZValue(-1)  # stay behind the interactive overlay items
+
+    def boundingRect(self):
+        return QRectF(0, 0, self._width, self._height)
+
+    def paint(self, painter, option, widget=None):
+        render_stackup_layout(self._draw_calls, painter, self._width, self._height)
+
+
+class InteractiveRegionItem(QGraphicsRectItem):
+    """Transparent overlay for one dielectric slab / metal / via box: gives it a
+    click-triggered info flyout and native click-to-select highlighting, without
+    StackupBackgroundItem's rendering having to know anything about interactivity.
+
+    The info flyout is shown explicitly from mousePressEvent() (QToolTip.showText()),
+    not via setToolTip() - setToolTip() would make Qt show it automatically on mere
+    hover, which is deliberately not wanted here: the flyout should only appear when
+    a shape is actually clicked.
+    """
+
+    _HIGHLIGHT_PEN = QPen(QColor(255, 140, 0), 3)
+
+    def __init__(self, rect, kind, key, ref, tooltip):
+        super().__init__(rect)
+        self.setPen(Qt.NoPen)
+        self.setBrush(Qt.NoBrush)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.info_text = tooltip
+        self.kind = kind          # "dielectric" or "layer"
+        self.key = key            # element Name, matching row_elements lookup in the editor
+        self.ref = ref            # dielectric_layer or metal_layer instance
+
+    def paint(self, painter, option, widget=None):
+        # unselected: draw nothing, StackupBackgroundItem already drew the real
+        # colors/labels underneath. Selected: a highlight outline instead of Qt's
+        # default dashed selection rectangle, which would look wrong here.
+        if self.isSelected():
+            painter.setPen(self._HIGHLIGHT_PEN)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self.rect())
+
+    def mousePressEvent(self, event):
+        super().mousePressEvent(event)  # keeps native click-to-select behavior
+        if self.info_text:
+            QToolTip.showText(event.screenPos(), self.info_text)
+
+
+class VectorWidget(QGraphicsView):
+    """This widget draws the stackup preview, and supports hovering a shape for a
+    tooltip and clicking a shape to select it (see elementSelected/select_element).
 
     The color/label logic for dielectrics and metals is injected as callables
     instead of being hardcoded here, so a host application can customize it
@@ -145,6 +588,10 @@ class VectorWidget(QWidget):
         metal_label_fn(metal, material, is_sheet) -> str
         via_label_suffix_fn(metal, material) -> str
     """
+
+    # emitted when a shape is clicked/selected in the preview: (kind, key), where
+    # kind is "dielectric" or "layer" and key is the element's Name
+    elementSelected = Signal(str, str)
 
     def __init__(self, materials_list, dielectrics_list, metals_list,
                  dielectric_color_fn, dielectric_label_fn,
@@ -158,292 +605,99 @@ class VectorWidget(QWidget):
         self.metal_label_fn = metal_label_fn
         self.via_label_suffix_fn = via_label_suffix_fn
 
-    def paintEvent(self, event):
+        self.setRenderHint(QPainter.Antialiasing)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setFrameShape(QFrame.NoFrame)
 
-        # utility: flip y to have y=0 at bottom
-        def flipy(y):
-            return self.height() - y
+        self._item_lookup = {}   # (kind, key) -> InteractiveRegionItem
+        scene = QGraphicsScene(self)
+        self.setScene(scene)
+        scene.selectionChanged.connect(self._on_scene_selection_changed)
 
-        # utility to draw text with alignment on right side
-        def drawText_right(x, y, w, h, text):
-            rect = QRect(x, y - h, w, h)
-            painter.drawText(rect, Qt.AlignVCenter | Qt.AlignRight, text)
+        self._rebuild_scene()
 
-        def drawText_left(x, y, w, h, text):
-            rect = QRect(x, y - h, w, h)
-            painter.drawText(rect, Qt.AlignVCenter | Qt.AlignLeft, text)
+    def refresh(self, materials_list, dielectrics_list, metals_list):
+        """Replaces the stackup data and rebuilds the scene - the refresh entry point
+        used by the editor every time the underlying XML changes (replaces the old
+        "mutate materials_list/dielectrics_list/metals_list then call .update()"
+        pattern, since there's no per-shape geometry to mutate in place anymore).
+        """
+        self.materials_list = materials_list
+        self.dielectrics_list = dielectrics_list
+        self.metals_list = metals_list
+        self._rebuild_scene()
 
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), Qt.white)
-        painter.setRenderHint(QPainter.Antialiasing)
+    def _rebuild_scene(self):
+        # keep whatever was selected (by identity of (kind, key), not by item, since
+        # every item is recreated below) selected across the rebuild, so an edit to
+        # the currently-selected layer doesn't make its preview highlight vanish
+        previously_selected = self._selected_key()
 
-        xmin = int(self.width() * 0.02)
-        xmax = int(self.width() * 0.98)
+        # compute_stackup_layout() is computed directly against the viewport's actual
+        # pixel size (matching what the old paintEvent()-based widget did with
+        # self.width()/self.height()), not a fixed logical canvas scaled to fit via
+        # fitInView() - text is drawn at a plain, unscaled font size, and scaling a
+        # smaller fixed canvas up/down to fit the actual (usually smaller) preview
+        # window would have shrunk that text along with the boxes. Rebuilding the
+        # layout on every resize (see resizeEvent below) costs a bit more than just
+        # re-scaling a cached scene, but keeps text legible at any window size.
+        width = max(self.viewport().width(), 1)
+        height = max(self.viewport().height(), 1)
 
-        ymin = int(self.height() * 0.025)
-        ymax = int(self.height() * 0.975)
+        scene = self.scene()
+        scene.clear()
+        self._item_lookup = {}
 
-        penBlack = QPen(Qt.black, 1)
-        penGray = QPen(QColor(134, 132, 130))
-        penDarkGray = QPen(QColor(53, 50, 47))
+        draw_calls, interactive_entries = compute_stackup_layout(
+            self.materials_list, self.dielectrics_list, self.metals_list,
+            width, height,
+            self.dielectric_color_fn, self.dielectric_label_fn,
+            self.metal_label_fn, self.via_label_suffix_fn)
 
-        # get total dielectric parts, where each metal in a dielectric adds one part
-        dielectric_shapes = []
-        total_parts = 0
-        # sorted by resolved zmin, not just reversed file/array order: a Reference-based
-        # dielectric's actual position comes from resolving its Reference by name (see
-        # dielectric_layers_list.resolve_references()), entirely independent of where it
-        # sits in the file - so reordering it there (e.g. Move Up/Down in the Dielectric
-        # Stack tab) must not change where it's drawn here, even though it does change
-        # self.dielectrics_list.dielectrics' own array order
-        dielectrics_bottom_up = sorted(self.dielectrics_list.dielectrics, key=lambda d: d.zmin)
-        for dielectric in dielectrics_bottom_up:  # bottom up
-            painter.setPen(penBlack)
+        scene.addItem(StackupBackgroundItem(draw_calls, width, height))
 
-            metals_inside = dielectric.get_planar_metals_inside()
-            # get number of unique zmin values in that list
-            zmin_list = []
-            for metal in metals_inside:
-                if not metal.zmin in zmin_list:
-                    zmin_list.append(metal.zmin)
-            metals_count = len(zmin_list)
+        for entry in interactive_entries:
+            item = InteractiveRegionItem(entry["rect"], entry["kind"], entry["key"],
+                                          entry["ref"], entry["tooltip"])
+            scene.addItem(item)
+            self._item_lookup[(entry["kind"], entry["key"])] = item
 
-            # first metal not aligned with dielectric?
-            if len(metals_inside) > 0:
-                if metals_inside[0].zmin > dielectric.zmin:
-                    metals_count = metals_count + 0.5
+        scene.setSceneRect(0, 0, width, height)
 
-            parts = max(1, metals_count)
-            dielectric_shape = {}
-            dielectric_shape['name'] = dielectric.name
-            dielectric_shape['dielectric'] = dielectric
-            dielectric_shape['numparts'] = parts
+        if previously_selected is not None and previously_selected in self._item_lookup:
+            self._item_lookup[previously_selected].setSelected(True)
 
-            materialname = dielectric.material
-            material = self.materials_list.get_by_name(materialname)
-            # dielectric color/label are app-specific (permittivity vs. thermal conductivity)
-            dielectric_shape['color'] = self.dielectric_color_fn(material)
-            dielectric_shape['material'] = material
+    def _selected_key(self):
+        for key, item in self._item_lookup.items():
+            if item.isSelected():
+                return key
+        return None
 
-            total_parts = total_parts + parts
-            dielectric_shapes.append(dielectric_shape)
+    def _on_scene_selection_changed(self):
+        selected = self.scene().selectedItems()
+        if not selected:
+            # clicking empty background clears selection - dismiss any flyout left
+            # showing from the previously-selected shape rather than stranding it
+            QToolTip.hideText()
+            return
+        item = selected[0]
+        self.elementSelected.emit(item.kind, item.key)
 
-        # calculate height of one dielectric shape
-        total_parts = max(total_parts, 1)
-        part_height = int((ymax - ymin) / (total_parts))
+    def select_element(self, kind, name):
+        """Selects/highlights the shape for (kind, name) - kind is "dielectric" or
+        "layer". Called by the editor when a table row is selected, to keep the
+        preview in sync with the table. A no-op if that shape is already the sole
+        selection, so this doesn't bounce back into elementSelected/the editor's own
+        selection-changed handling.
+        """
+        item = self._item_lookup.get((kind, name))
+        if self.scene().selectedItems() == ([item] if item is not None else []):
+            return
+        self.scene().clearSelection()
+        if item is not None:
+            item.setSelected(True)
 
-        y = ymin
-        w = xmax - ymin
-
-        # we need to store data for original z position and the displayed y position
-        stored_z = np.array([0])
-        stored_y = np.array([ymin])
-
-        for dielectric_shape in dielectric_shapes:
-            h = part_height * dielectric_shape['numparts']
-            dielectric = dielectric_shape['dielectric']
-            color = dielectric_shape['color']
-            material = dielectric_shape['material']
-
-            material_string = self.dielectric_label_fn(dielectric, material)
-
-            painter.setPen(penBlack)
-            painter.setBrush(color)
-            painter.drawRect(xmin, flipy(y), w, -h)
-            drawText_left(xmin + 5, flipy(y), w, h, dielectric.name)
-            drawText_right(xmin, flipy(y), w - 5, h, material_string)
-
-            if not dielectric.zmax in stored_z:
-                stored_z = np.append(stored_z, dielectric.zmax)
-                stored_y = np.append(stored_y, y + h)
-
-            # get metals inside this dielectric
-            metals_inside = dielectric.get_planar_metals_inside()
-            # height for one dielectric segment including one metal is part_height
-            if len(metals_inside) > 0:
-
-                # there could be multiple metals starting at the same zmin
-
-                # draw planar metals, one after another
-                ymetal = y
-                for n, metal in enumerate(metals_inside):
-
-                    painter.setPen(penBlack)
-
-                    # check if metal is aligned with dielectric zmin
-                    elevation = metal.zmin - dielectric.zmin
-                    if n == 0 and (abs(elevation) > 0.001):
-                        # draw some vertical offset, not aligned with dielectric
-                        ymetal = ymetal + part_height * 0.5  # slight offset
-
-                    # check if next metal is at same zmin
-                    next_at_same_zmin = False
-                    previous_at_same_zmin = False
-                    xmetal = xmin + 120
-                    wmetal = w - 200
-
-                    if n < len(metals_inside) - 1:
-                        next_metal = metals_inside[n + 1]
-                        if abs(next_metal.zmin - metal.zmin) < 0.001:
-                            next_at_same_zmin = True
-                            xmetal = xmin + 120
-                            wmetal = int(w / 2) - 100
-                    else:
-                        next_metal = None
-
-                    # for the "distance to metal above" label below: several metals
-                    # can share this zmin (e.g. sheet resistors drawn side by side),
-                    # so skip past all of them to the first one that's actually at a
-                    # different (higher) zmin - next_metal above is only the very next
-                    # list entry, which for a same-zmin sibling would wrongly give 0
-                    next_metal_above = None
-                    for candidate in metals_inside[n + 1:]:
-                        if abs(candidate.zmin - metal.zmin) >= 0.001:
-                            next_metal_above = candidate
-                            break
-
-                    if n > 0:
-                        previous_metal = metals_inside[n - 1]
-                        if abs(previous_metal.zmin - metal.zmin) < 0.001:
-                            xmetal = xmin + int(w / 2) + 20
-                            wmetal = int(w / 2) - 100
-                            previous_at_same_zmin = True
-
-                    material = self.materials_list.get_by_name(metal.material)
-                    if material is not None:
-                        if metal.is_sheet:
-                            # sheet metal that is simulated with zero extrusion
-                            height = 3
-                            label_string = self.metal_label_fn(metal, material, True)
-                        else:
-                            # regular extruded metal
-                            height = part_height / 2
-                            label_string = self.metal_label_fn(metal, material, False)
-
-                        # the box for this metal
-                        if material.type.upper() == "CONDUCTOR":
-                            painter.setBrush(QColor(230, 230, 230, 90))
-                            painter.drawRect(xmetal, flipy(ymetal), wmetal, -int(height))
-                        else:
-                            painter.setBrush(QColor(230, 130, 130, 90))
-                            painter.drawRect(xmetal, flipy(ymetal), wmetal, -int(height))
-                    else:
-                        # material assignment is invalid
-                        height = part_height / 2
-                        painter.setBrush(QColor(255, 0, 0, 80))
-                        painter.drawRect(xmetal, flipy(ymetal), wmetal, -int(height))
-                        label_string = 'INVALID MATERIAL REFERENCE: ' + metal.material
-
-                    painter.setPen(penBlack)
-                    drawText_left(xmetal + 10, flipy(ymetal), wmetal, part_height / 2, f"{metal.name} ({metal.layernum})")
-                    painter.setPen(penGray)
-                    drawText_right(xmetal, flipy(ymetal), wmetal - 10, part_height / 2, label_string)
-                    # store the drawing position, because vias will refer to that
-                    if not metal.zmin in stored_z:
-                        stored_z = np.append(stored_z, metal.zmin)
-                        stored_y = np.append(stored_y, ymetal)
-                    if not metal.zmax in stored_z:
-                        stored_z = np.append(stored_z, metal.zmax)
-                        stored_y = np.append(stored_y, ymetal + height)
-
-                    painter.setPen(penGray)
-                    painter.drawLine(xmetal - 60, flipy(ymetal), xmetal - 10, flipy(ymetal))
-                    # draw line at top side of metal
-                    if not metal.is_sheet:
-                        painter.drawLine(xmetal - 60, flipy(ymetal + height), xmetal - 10, flipy(ymetal + height))
-                        heightstring = f'{metal.thickness:.3f}µm'
-                        painter.setPen(penDarkGray)
-                        drawText_left(xmetal - 60, flipy(ymetal), 50, height, heightstring)
-
-                    if not previous_at_same_zmin:
-                        # draw height to metal above
-                        if next_metal_above is not None:
-                            dz = abs(next_metal_above.zmin - metal.zmax)
-                            heightstring = f'{dz:.3f}µm'
-                            painter.setPen(penGray)
-                            # sheet metals draw at height=3px, too short to fit this
-                            # label without vertical clipping - give the text its own
-                            # minimum box height, independent of the drawn box height
-                            text_height = max(height, 14)
-                            drawText_left(xmetal - 60, flipy(ymetal + height), 50, text_height, heightstring)
-
-                    if n == len(metals_inside) - 1:
-                        # last metal (top metal)
-                        # place text for distance to dielectric boundary
-
-                        painter.setPen(penBlack)
-                        # a metal is registered "inside" a dielectric by its zmin alone
-                        # (see util_stackup_reader.register_metals_inside()) - its zmax
-                        # can legitimately extend past that dielectric's own zmax into
-                        # the one(s) above (e.g. a thick metal sitting in a very thin
-                        # dielectric slab), which would otherwise show as a negative,
-                        # confusingly-worded "distance to the boundary above". Floor at
-                        # 0 - the metal is still drawn at its correct position/height,
-                        # this only affects this one label.
-                        dz = max(0.0, dielectric.zmax - metal.zmax)
-                        if dz > 10:
-                            heightstring = f'{dz:.1f}µm'
-                        else:
-                            heightstring = f'{dz:.3f}µm'
-                        painter.setPen(penGray)
-                        painter.drawText(xmetal - 60, flipy(ymetal + height + 5), heightstring)
-
-                    if n == 0 and elevation > 0.001:
-                        # metal not aligned with bottom of dielectric, add a label for offset value
-                        heightstring = f'{elevation:.3f}µm'
-                        painter.setPen(penGray)
-                        painter.drawText(xmetal - 60, flipy(ymetal - 10), heightstring)
-
-                    if not next_at_same_zmin:
-                        # increase screen y for next metal
-                        ymetal = ymetal + part_height
-
-            y = y + h
-
-        # sort stored positions
-        if len(stored_z) > 2:
-            idx = np.argsort(stored_z)
-            y_sorted = stored_y[idx]
-            z_sorted = stored_z[idx]
-            # linear, not cubic: the z->y mapping is a layout position (screen height
-            # per dielectric is set by how many metals are stacked inside it, not by
-            # its physical thickness), so slope can change drastically between
-            # consecutive stored points - e.g. a thick, metal-free substrate maps to
-            # almost no screen height while a thin, via-packed dielectric maps to a
-            # lot. A cubic spline through data like that readily overshoots (Runge's
-            # phenomenon), and with unbounded extrapolation that overshoot is
-            # unbounded - enough to overflow the int coordinates drawRect() needs
-            # below. Linear interpolation/extrapolation is bounded by construction.
-            z_to_y = _LinearInterpExtrapolate(z_sorted, y_sorted)
-
-            # next we draw the vias, based on the screen position of metals that we have stored
-            # via position alternates between 3 positions along x axis
-            pos = 1
-            w = (xmax - xmin) / 10
-
-            painter.setBrush(QColor(136, 192, 200, 80))
-            for metal in self.metals_list.metals:
-                if metal.is_via or metal.is_dielectric:
-
-                    material = self.materials_list.get_by_name(metal.material)
-                    label_suffix = self.via_label_suffix_fn(metal, material)
-
-                    y1 = z_to_y(metal.zmin)
-                    y2 = z_to_y(metal.zmax)
-                    h = abs(y2 - y1)
-
-                    if pos == 1:
-                        xvia = (xmax + xmin) / 2 - 4 * w / 2
-                        pos = 2
-                    elif pos == 2:
-                        xvia = (xmax + xmin) / 2 - w / 2
-                        pos = 3
-                    else:
-                        xvia = (xmax + xmin) / 2 + w
-                        pos = 1
-
-                    painter.setPen(penBlack)
-                    painter.drawRect(xvia, flipy(y1), w, -h)
-                    painter.drawText(xvia + 5, flipy(y1 + 5), f"{metal.name} ({metal.layernum})" + label_suffix)
-
-        painter.end()
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._rebuild_scene()
