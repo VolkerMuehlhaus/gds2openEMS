@@ -24,6 +24,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/VolkerMuehlhaus/gds2openEMS"
 Repository = "https://github.com/VolkerMuehlhaus/gds2openEMS"
+Changelog = "https://github.com/VolkerMuehlhaus/gds2openEMS/blob/main/doc/CHANGES.md"
 
 [project.scripts]
 stackupEditor = "stackup_editor.stackupEditor:main"
