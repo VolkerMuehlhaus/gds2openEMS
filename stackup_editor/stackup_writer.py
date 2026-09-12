@@ -639,6 +639,20 @@ def remove_layer(root, element):
   get_layers_element(root).remove(element)
 
 
+def reorder_layers(root, ordered_elements):
+  """Reorder <Layer> elements to match ordered_elements (same elements, new
+  order) - used by the Stackup Editor's click-header-to-sort. Layer order in
+  the file has no effect on gds2openEMS's own reader, which re-sorts metals by
+  resolved Zmin itself right after parsing regardless of file order - this is
+  purely for the editor's own display/file readability.
+  """
+  layers_el = get_layers_element(root)
+  for element in ordered_elements:
+    layers_el.remove(element)
+  for element in ordered_elements:
+    layers_el.append(element)
+
+
 def set_substrate_offset(root, value):
   """Add, update, or remove the single optional <Substrate Offset="..."/> element.
   Args:
