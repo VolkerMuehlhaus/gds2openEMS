@@ -51,6 +51,24 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtCore import Qt, QRect, QRectF, Signal
 
+from gds2openEMS import stackup_reader
+
+INVALID_MATERIAL_COLOR = QColor(255, 0, 0, 80)
+
+# Distinct from the regular conductor fill (QColor(230,230,230,90)), the resistor/sheet fill
+# (QColor(230,130,130,90)), and INVALID_MATERIAL_COLOR above - a PEC layer is valid, just
+# unlike any of those, so it gets its own recognizable "ideal conductor" look.
+PEC_MATERIAL_COLOR = QColor(180, 220, 255, 140)
+
+
+def _is_pec_material(materialname):
+    """True if materialname is the reserved PEC keyword (case-insensitive) - a Layer that
+       compute_stackup_layout() below must draw as an ideal conductor even though
+       materials_list.get_by_name() deliberately returns None for it (see
+       stackup_reader.PEC_MATERIAL_NAME).
+    """
+    return materialname is not None and materialname.strip().upper() == stackup_reader.PEC_MATERIAL_NAME.upper()
+
 
 # ---------- STACKUP PREVIEW COLOR/LABEL DEFAULTS (permittivity-based) ------------------
 
@@ -255,8 +273,15 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
 
         materialname = dielectric.material
         material = materials_list.get_by_name(materialname)
-        # dielectric color/label are app-specific (permittivity vs. thermal conductivity)
-        dielectric_shape['color'] = dielectric_color_fn(material)
+        if material is not None:
+            # dielectric color/label are app-specific (permittivity vs. thermal conductivity)
+            dielectric_shape['color'] = dielectric_color_fn(material)
+        else:
+            # unresolved Material reference (typo, or a transient state while the user is
+            # still typing a new value in the editor) - PEC is never valid here (rejected by
+            # stackup_writer.validate_stackup()), so this is always a genuine error, unlike
+            # the metal/sheet branch below which also has a legitimate PEC case to handle
+            dielectric_shape['color'] = INVALID_MATERIAL_COLOR
         dielectric_shape['material'] = material
 
         total_parts = total_parts + parts
@@ -279,7 +304,10 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
         color = dielectric_shape['color']
         material = dielectric_shape['material']
 
-        material_string = dielectric_label_fn(dielectric, material)
+        if material is not None:
+            material_string = dielectric_label_fn(dielectric, material)
+        else:
+            material_string = 'INVALID MATERIAL REFERENCE: ' + dielectric.material
 
         setPen(penBlack)
         setBrush(color)
@@ -370,10 +398,18 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
                     else:
                         setBrush(QColor(230, 130, 130, 90))
                         drawRect(xmetal, flipy(ymetal), wmetal, -int(height_box))
+                elif _is_pec_material(metal.material):
+                    # reserved PEC keyword: valid (no <Materials> entry needed/expected -
+                    # materials_list.get_by_name() deliberately returns None for it), draw as
+                    # an ideal conductor instead of falling into the invalid-reference case below
+                    height_box = 3 if metal.is_sheet else part_height / 2
+                    setBrush(PEC_MATERIAL_COLOR)
+                    drawRect(xmetal, flipy(ymetal), wmetal, -int(height_box))
+                    label_string = 'PEC (ideal conductor)'
                 else:
                     # material assignment is invalid
                     height_box = part_height / 2
-                    setBrush(QColor(255, 0, 0, 80))
+                    setBrush(INVALID_MATERIAL_COLOR)
                     drawRect(xmetal, flipy(ymetal), wmetal, -int(height_box))
                     label_string = 'INVALID MATERIAL REFERENCE: ' + metal.material
 

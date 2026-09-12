@@ -36,7 +36,7 @@ repo's own gds2openEMS.stackup_reader. Per this workspace's convention (see
 CLAUDE.md), the two are duplicated, not shared/symlinked.
 """
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 
 import ast
 import xml.etree.ElementTree as ET
@@ -1055,6 +1055,10 @@ def validate_stackup(root):
 
       if not material:
         errors.append(f"Dielectric '{label}' is missing required attribute 'Material'")
+      elif material.upper() == stackup_reader.PEC_MATERIAL_NAME.upper():
+        errors.append(f"Dielectric '{label}' cannot use reserved Material 'PEC' (only valid on conductor/via/sheet Layers)")
+      elif material.upper() == "AIR":
+        pass  # built-in default material, no <Materials> entry required
       elif material not in material_names:
         errors.append(f"Dielectric '{label}' references undefined Material '{material}'")
 
@@ -1172,6 +1176,12 @@ def validate_stackup(root):
 
       if not material:
         errors.append(f"Layer '{label}' is missing required attribute 'Material'")
+      elif material.upper() == stackup_reader.PEC_MATERIAL_NAME.upper():
+        if ltype and ltype.lower() not in ("conductor", "via", "sheet"):
+          errors.append(f"Layer '{label}' uses reserved Material 'PEC', which is only valid on conductor/via/sheet layers, not '{ltype}'")
+        # else: valid, no <Materials> entry required
+      elif material.upper() == "AIR":
+        pass  # built-in default material, no <Materials> entry required
       elif material not in material_names:
         errors.append(f"Layer '{label}' references undefined Material '{material}'")
 
@@ -1350,3 +1360,33 @@ def validate_stackup(root):
                          f"found {len(operands)}")
 
   return errors
+
+
+def find_reserved_material_definitions(root):
+  """Non-blocking companion to validate_stackup(): warn (don't error) about a <Material
+     Name="PEC"> entry in the file. PEC is a reserved keyword gds2openEMS recognizes directly
+     on a Layer's Material="..." attribute, bypassing materials_list.get_by_name() entirely -
+     so an explicit <Material Name="PEC"> entry is not itself invalid, but its declared
+     properties (Type/Conductivity/etc.) are silently ignored, which is worth flagging since
+     it's easy to mistake for having an effect.
+
+     "AIR" is deliberately not covered here: a user-defined <Material Name="AIR"> is a normal,
+     intended override of the built-in default (see stackup_reader.parse_substrate()), not a
+     no-op.
+  Args:
+      root (xml.etree.ElementTree.Element): root <Stackup> element
+  Returns:
+      list of str: one warning message per reserved-name Material definition found
+  """
+  warnings = []
+  materials_el = get_materials_element(root)
+  if materials_el is not None:
+    for el in materials_el.findall("Material"):
+      name = el.get("Name") or ""
+      if name.upper() == stackup_reader.PEC_MATERIAL_NAME.upper():
+        warnings.append(
+            f"Material '{name}' is a reserved name - gds2openEMS always treats a layer's "
+            f'Material="{stackup_reader.PEC_MATERIAL_NAME}" as an ideal conductor and ignores '
+            "this entry's properties"
+        )
+  return warnings
