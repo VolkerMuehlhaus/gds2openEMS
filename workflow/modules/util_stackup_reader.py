@@ -48,8 +48,16 @@
 #              so a caller built before <Variables> existed (e.g. setupEM's stackup_editor.py,
 #              which constructs these directly rather than via parse_substrate()) keeps working
 #              unchanged for ordinary files, instead of every call raising TypeError outright
+# 12 Sep 2026: added a built-in default "AIR" material (Permittivity=1.0, matching the
+#              convention already used across example stackup files) so a <Dielectric>/<Layer>
+#              can reference Material="AIR" without a <Material Name="AIR"> entry in the file;
+#              an explicit user-defined <Material Name="AIR"> still overrides it
+# 12 Sep 2026: added the reserved "PEC" material name - Layer Material="PEC" is now valid on
+#              conductor/via/sheet layers without any matching <Materials> entry; see
+#              addGeometry_to_CSX() in util_simulation_setup.py for where the reserved name is
+#              resolved into a literal ideal-conductor CSX.AddMetal(...) construct
 
-__version__ = "1.7.2"
+__version__ = "1.8.0"
 
 import os
 import math
@@ -64,6 +72,24 @@ import xml.etree.ElementTree
 # change actually needs a newer reader to be interpreted correctly (e.g. Reference/
 # ReferenceEdge bumped the format to "3.0"; <Variables>/"=" expressions bumped it to "3.1").
 SUPPORTED_SCHEMA_VERSION = "3.1"
+
+# Reserved Layer Material="..." name for an ideal conductor. Recognized case-insensitively
+# directly on metal_layer.material by util_simulation_setup.py, bypassing
+# stackup_materials_list.get_by_name() entirely - it is valid on a conductor/via/sheet layer
+# with no matching <Material> entry in <Materials> at all.
+PEC_MATERIAL_NAME = "PEC"
+
+# Built-in default properties for the reserved "AIR" dielectric material, used by
+# parse_substrate() below only when the file doesn't define its own <Material Name="AIR">.
+# Matches the convention already used consistently across existing example stackup files.
+DEFAULT_AIR_MATERIAL_ATTRIBUTES = {
+    "Name": "AIR",
+    "Type": "Dielectric",
+    "Permittivity": "1.0",
+    "DielectricLossTangent": "0.0",
+    "Conductivity": "0",
+    "Color": "d0d0d0",
+}
 
 
 def _parse_schema_version (version_string):
@@ -1514,6 +1540,13 @@ def parse_substrate (substrate_root, variable_overrides=None):
   materials_list = stackup_materials_list() # initialize empty list
   for data in  substrate_root.iter("Material"):
       materials_list.append (stackup_material(data, variables))
+
+  # provide "AIR" as a built-in default dielectric material (e.g. for an air-gap Dielectric/
+  # Layer) if the file doesn't define its own <Material Name="AIR"> - runs after the loop
+  # above, so a user-defined AIR (in any case) already resolves via get_by_name() and wins
+  if materials_list.get_by_name("AIR") is None:
+      default_air_data = xml.etree.ElementTree.Element("Material", DEFAULT_AIR_MATERIAL_ATTRIBUTES)
+      materials_list.append (stackup_material(default_air_data, variables))
 
   # get dielectric layers from  XML
   dielectrics_list = dielectric_layers_list() # initialize empty list
