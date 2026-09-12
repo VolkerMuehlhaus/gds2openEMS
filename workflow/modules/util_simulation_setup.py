@@ -25,9 +25,18 @@ import socket
 
 from . import util_utilities as utilities
 from . import util_meshlines
+from .util_stackup_reader import PEC_MATERIAL_NAME
 
 from CSXCAD import ContinuousStructure
 from CSXCAD import AppCSXCAD_BIN
+
+
+def _is_pec_material (materialname):
+  """True if materialname is the reserved PEC_MATERIAL_NAME (case-insensitive), i.e. a
+     Layer Material="..." that should bypass normal materials_list lookup entirely and be
+     modeled as a literal ideal conductor (CSX.AddMetal) instead.
+  """
+  return materialname is not None and materialname.strip().upper() == PEC_MATERIAL_NAME.upper()
 from openEMS import openEMS
 from openEMS.physical_constants import *
 
@@ -386,6 +395,11 @@ def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials
                     if materialname in CSX_materials_list.keys():
                         # already in list, was used before
                         CSX_material = CSX_materials_list[materialname]
+                    elif _is_pec_material(materialname):
+                        # reserved "PEC" name: literal ideal-conductor volume, no <Materials>
+                        # entry needed or consulted at all
+                        CSX_material = CSX.AddMetal(materialname)
+                        CSX_materials_list.update({materialname: CSX_material})
                     else:
                         # create CSX material, was not used before
                         material = materials_list.get_by_name(materialname)
@@ -412,23 +426,29 @@ def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials
                     # get thickness of layer definition
                     thickness = metal.zmax - metal.zmin # should always be zero for sheet
 
-                    # get material type
-                    material = materials_list.get_by_name(materialname)
-
-                    if material.type == 'RESISTOR' and material.Rs>0 :
-                        # define conducting sheet with sigma calculated from material Rs value and thickness from layer 
-                        if thickness==0:
-                            # thickness not specified in stackup
-                            thickness=1e-6 # assume 1 micron for loss calculation, we then calculate Sigma to obtain desired Rs
-                        sigma = 1/(thickness*material.Rs)  
-                        CSX_material = CSX.AddConductingSheet(metal.name + '_' + material.name, conductivity=sigma, thickness=thickness)
-                        CSX_materials_list.update({material.name: CSX_material})
+                    if _is_pec_material(materialname):
+                        # reserved "PEC" name: literal ideal-conductor sheet, no <Materials>
+                        # entry needed or consulted at all
+                        CSX_material = CSX.AddMetal(metal.name + '_' + PEC_MATERIAL_NAME)
+                        CSX_materials_list.update({materialname: CSX_material})
                     else:
-                        print('WARNING: Invalid material assigned to layer ', metal.name)
-                        print(str(material))    
-                        print('=====> MATERIAL IS REPLACED BY PEC (PERFECT CONDUCTOR) <=====')
-                        CSX_material = CSX.AddMaterial('PEC_' + material.name)
-                        CSX_materials_list.update({material.name: CSX_material})
+                        # get material type
+                        material = materials_list.get_by_name(materialname)
+
+                        if material.type == 'RESISTOR' and material.Rs>0 :
+                            # define conducting sheet with sigma calculated from material Rs value and thickness from layer
+                            if thickness==0:
+                                # thickness not specified in stackup
+                                thickness=1e-6 # assume 1 micron for loss calculation, we then calculate Sigma to obtain desired Rs
+                            sigma = 1/(thickness*material.Rs)
+                            CSX_material = CSX.AddConductingSheet(metal.name + '_' + material.name, conductivity=sigma, thickness=thickness)
+                            CSX_materials_list.update({material.name: CSX_material})
+                        else:
+                            print('WARNING: Invalid material assigned to layer ', metal.name)
+                            print(str(material))
+                            print('=====> MATERIAL IS REPLACED BY PEC (PERFECT CONDUCTOR) <=====')
+                            CSX_material = CSX.AddMetal('PEC_' + material.name)
+                            CSX_materials_list.update({material.name: CSX_material})
 
                     # add Polygon to CSX but no thickness
                     # remember value for MA meshing algorithm, which works on CSX polygons rather than our GDS polygons

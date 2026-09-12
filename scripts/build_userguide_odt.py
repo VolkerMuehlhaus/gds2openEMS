@@ -28,7 +28,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC_MD = os.path.join(REPO_ROOT, 'doc', 'userguide_md_format', 'Using_OpenEMS_Python_with_IHP_SG13G2_v3.md')
 DST_ODT = os.path.join(REPO_ROOT, 'doc', 'Using_OpenEMS_Python_with_IHP_SG13G2_v3.odt')
 
-GITHUB_BLOB_BASE = 'https://github.com/VolkerMuehlhaus/openems_ihp_sg13g2/blob/main/'
+GITHUB_BLOB_BASE = 'https://github.com/VolkerMuehlhaus/gds2openEMS/blob/main/'
 # SRC_MD lives in doc/userguide_md_format/, so one level up ('../') lands in doc/,
 # and two levels up ('../../') lands at the repo root.
 UPDIR_TO_REPO_PATH = {1: 'doc/', 2: ''}

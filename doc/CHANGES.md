@@ -2,6 +2,12 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 12-Sep-2026
+
+Added two reserved stackup materials that need no `<Materials>` entry: `PEC` (ideal conductor, on conductor/via/sheet Layers, modeled with `CSX.AddMetal`) and `AIR` (built-in default dielectric, overridable). Also supported in the Stackup Editor (`stackup_editor/`).
+
+Ported the Stackup Editor's Layers-tab column-header click-to-sort (Name alphabetically, Zmin/Zmax resulting position largest-first) from setupEM, closing a gap since this repo's editor was forked off.
+
 ## 03-Sep-2026
 
 Added a graphical **Stackup XML Editor** (`pip install gds2openEMS` now also installs a `stackupEditor` console command). Covers Variables, Materials, the Dielectric stack, drawn Layers, Reference-relative positioning, Derived Layers, and Thermal Tables, with a live cross-section preview, undo, and an "Import from ADS Momentum" option (`*.subst`/`*.ltd`). `PySide6` is now a dependency of `gds2openEMS`.
