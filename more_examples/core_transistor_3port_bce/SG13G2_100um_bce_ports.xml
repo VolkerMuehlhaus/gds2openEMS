@@ -1,0 +1,77 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Stackup schemaVersion="3.1">
+  <!-- openEMS stackup for the core_transistor_3port_bce example.
+       Mirrors gds2palace_ihp_sg13g2/more_examples/core_transistor_3port_bce/SG13G2_100um_bce_ports.xml
+       (same REF_FOR_TRANSISTOR artificial reference plane, same Reference-relative/Variables/PEC
+       features), with the full IHP SG13G2 metal/via/MIM stack from this repo's standard openEMS
+       stackup template (../parameterized_XML_stackup/SG13G2_parameterized.xml), even though this
+       particular GDSII file only draws Metal2 and up - kept for stackup fidelity/reuse with other
+       layouts. -->
+  <Variables>
+    <Variable Name="air_thickness" Value="200" />
+    <Variable Name="total_thickness" Value="200" />
+    <Variable Name="bulk_thickness" Value="=total_thickness-19.8" />
+  </Variables>
+  <Materials>
+    <Material Name="Activ" Type="Conductor" Conductivity="357141.0" Color="00ff00" />
+    <Material Name="Metal1" Type="Conductor" Conductivity="21640000.0" Color="39bfff" />
+    <Material Name="Metal2" Type="Conductor" Conductivity="23190000.0" Color="ccccd9" />
+    <Material Name="Metal3" Type="Conductor" Conductivity="23190000.0" Color="d80000" />
+    <Material Name="Metal4" Type="Conductor" Conductivity="23190000.0" Color="93e837" />
+    <Material Name="Metal5" Type="Conductor" Conductivity="23190000.0" Color="dcd146" />
+    <Material Name="TopMetal1" Type="Conductor" Conductivity="27800000.0" Color="ffe6bf" />
+    <Material Name="TopMetal2" Type="Conductor" Conductivity="30300000.0" Color="ff8000" />
+    <Material Name="TopVia2" Type="Conductor" Conductivity="3143000.0" Color="ff8000" />
+    <Material Name="TopVia1" Type="Conductor" Conductivity="2191000.0" Color="ffe6bf" />
+    <Material Name="Via4" Type="Conductor" Conductivity="1660000.0" Color="deac5e" />
+    <Material Name="Via3" Type="Conductor" Conductivity="1660000.0" Color="9ba940" />
+    <Material Name="Via2" Type="Conductor" Conductivity="1660000.0" Color="ff3736" />
+    <Material Name="Via1" Type="Conductor" Conductivity="1660000.0" Color="ccccff" />
+    <Material Name="Cont" Type="Conductor" Conductivity="2390000.0" Color="00ffff" />
+    <Material Name="Passive" Type="Dielectric" Permittivity="6.6" DielectricLossTangent="0.0" Color="a0a0f0" />
+    <Material Name="SiO2" Type="Dielectric" Permittivity="4.1" DielectricLossTangent="0.0" Color="fffcad" />
+    <Material Name="Substrate" Type="Semiconductor" Permittivity="11.9" DielectricLossTangent="0" Conductivity="2.0" Color="01e0ff" />
+    <Material Name="EPI" Type="Semiconductor" Permittivity="11.9" DielectricLossTangent="0" Conductivity="5.0" Color="294fff" />
+    <Material Name="AIR" Type="Dielectric" Permittivity="1.0" DielectricLossTangent="0.0" Color="d0d0d0" />
+    <Material Name="MIM_equiv" Type="Dielectric" Permittivity="16.87" DielectricLossTangent="0.0" Color="ff0000" />
+  </Materials>
+  <ELayers LengthUnit="um">
+    <Dielectrics>
+      <Dielectric Name="AIR" Reference="Passive" ReferenceEdge="Top" Material="AIR" Thickness="=air_thickness" />
+      <Dielectric Name="Passive" Reference="SiO2" ReferenceEdge="Top" Material="Passive" Thickness="0.4000" />
+      <Dielectric Name="SiO2" Reference="EPI" ReferenceEdge="Top" Material="SiO2" Thickness="15.7303" />
+      <Dielectric Name="EPI" Reference="Substrate" ReferenceEdge="Top" Material="EPI" Thickness="3.7500" />
+      <Dielectric Name="Substrate" Material="Substrate" Thickness="=bulk_thickness" />
+    </Dielectrics>
+    <Layers>
+      <Layer Name="TopMetal2" Type="conductor" Reference="TopVia2" ReferenceEdge="Top" Material="TopMetal2" Layer="134" Zmin="0.0000" Zmax="3.0000" />
+      <Layer Name="TopVia2" Type="via" Reference="TopMetal1" ReferenceEdge="Top" Material="TopVia2" Layer="133" Zmin="0.0000" Zmax="2.8000" />
+      <Layer Name="TopMetal1" Type="conductor" Reference="TopVia1" ReferenceEdge="Top" Material="TopMetal1" Layer="126" Zmin="0.0000" Zmax="2.0000" />
+      <!-- MIM cap: dual-layer MIM_DK (dielectric-equivalent) + MIM (top plate metal) - the
+           openEMS-specific representation used across this repo, see ../parameterized_XML_stackup. -->
+      <Layer Name="MIM" Type="conductor" Reference="MIM_DK" ReferenceEdge="Top" Material="TopVia1" Layer="36" Zmin="0.0000" Zmax="0.7503" />
+      <Layer Name="TopVia1" Type="via" Reference="Metal5" ReferenceEdge="Top" Material="TopVia1" Layer="125" Zmin="0.0000" Zmax="0.8503" />
+      <Layer Name="MIM_DK" Type="conductor" Reference="Metal5" ReferenceEdge="Top" Material="MIM_equiv" Layer="36" Zmin="0.0000" Zmax="0.1000" />
+      <Layer Name="Metal5" Type="conductor" Reference="Via4" ReferenceEdge="Top" Material="Metal5" Layer="67" Zmin="0.0000" Zmax="0.4900" />
+      <Layer Name="Via4" Type="via" Reference="Metal4" ReferenceEdge="Top" Material="Via4" Layer="66" Zmin="0.0000" Zmax="0.5400" />
+      <Layer Name="Metal4" Type="conductor" Reference="Via3" ReferenceEdge="Top" Material="Metal4" Layer="50" Zmin="0.0000" Zmax="0.4900" />
+      <Layer Name="Via3" Type="via" Reference="Metal3" ReferenceEdge="Top" Material="Via3" Layer="49" Zmin="0.0000" Zmax="0.5400" />
+      <Layer Name="Metal3" Type="conductor" Reference="Via2" ReferenceEdge="Top" Material="Metal3" Layer="30" Zmin="0.0000" Zmax="0.4900" />
+      <Layer Name="Via2" Type="via" Reference="Metal2" ReferenceEdge="Top" Material="Via2" Layer="29" Zmin="0.0000" Zmax="0.5400" />
+      <Layer Name="Metal2" Type="conductor" Reference="Via1" ReferenceEdge="Top" Material="Metal2" Layer="10" Zmin="0.0000" Zmax="0.4900" />
+      <Layer Name="Via1" Type="via" Reference="Metal1" ReferenceEdge="Top" Material="Via1" Layer="19" Zmin="0.0000" Zmax="0.5400" />
+      <Layer Name="Metal1" Type="conductor" Reference="Cont" ReferenceEdge="Top" Material="Metal1" Layer="8" Zmin="0.0000" Zmax="0.4200" />
+      <Layer Name="Cont" Type="via" Reference="Activ" ReferenceEdge="Top" Material="Cont" Layer="6" Zmin="0.0000" Zmax="0.6400" />
+      <!-- Artificial common reference for the 3 transistor-terminal via ports (203/204/205),
+           0.4 um above the top of EPI, i.e. exactly at the top of Activ - same position and
+           purpose as REF_FOR_TRANSISTOR in the gds2palace stackup. openEMS represents a PEC
+           sheet as a literal zero-thickness ideal conductor (CSX.AddMetal); see README.md for
+           how that compares to Palace's native Boundaries.PEC treatment of the same sheet. -->
+      <Layer Name="REF_FOR_TRANSISTOR" Type="sheet" Reference="SiO2" ReferenceEdge="Bottom" Material="PEC" Layer="300" Zmin="0.4" Zmax="0.4" />
+      <Layer Name="Activ" Type="conductor" Reference="SiO2" ReferenceEdge="Bottom" Material="Activ" Layer="1" Zmin="0.0000" Zmax="0.4000" />
+      <Layer Name="SUBGND" Type="conductor" Reference="EPI" ReferenceEdge="Bottom" Material="PEC" Layer="250" Zmin="0.0000" Zmax="3.7500" />
+      <Layer Name="LBE" Type="dielectric" Reference="Substrate" ReferenceEdge="Bottom" Material="AIR" Layer="157" Zmin="0.0000" Zmax="=bulk_thickness+3.75" />
+      <Layer Name="BACKSIDEGND" Type="conductor" Reference="Substrate" ReferenceEdge="Bottom" Material="PEC" Layer="251" Zmin="-6.2500" Zmax="0.0000" />
+    </Layers>
+  </ELayers>
+</Stackup>

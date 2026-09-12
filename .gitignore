@@ -165,3 +165,7 @@ sub-2/
 
 # Local test data (not tracked)
 test-data/
+
+# generated openEMS model/simulation output for more_examples (run artifacts, not source
+# content) - matches gds2palace_ihp_sg13g2's more_examples/**/palace_model/ convention
+more_examples/**/output/
