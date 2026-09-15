@@ -439,6 +439,8 @@ All examples read GDSII + XML stackup and write a Touchstone S-parameter file (e
 
 **What is a good mesh size?** There's no single answer — it depends on the smallest feature (gap or line width) you need to resolve accurately, and on how much time you can afford. As a starting point, a `refined_cellsize` around 1/5 to 1/10 of your smallest critical dimension is reasonable; check convergence by comparing results at two different `refined_cellsize` values before trusting the finer one.
 
+**"Warning: Unused primitive (type: LinPoly) detected in property ..."**: These messages pop up when openEMS solver detects a layout with multiple touching metals on the same layer and same priority. It is purely cosmetic in this workflow and can be safely ignored.
+
 **Why is my simulation slow?** FDTD simulation time scales with mesh cell count and the number of time steps needed to reach `energy_limit`. Absorbing boundaries (`MUR`, and especially `PML_8`) and structures with high-Q resonances both increase the number of time steps needed. Check the mesh cell count reported at the start of the run, and whether `refined_cellsize` is finer than actually needed everywhere, not just at the features that need it.
 
 **Can I reduce the stackup by removing the substrate for transmission-line models?** Yes, if a ground plane between the signal and the substrate effectively shields the fields from reaching it — `SG13G2_nosub.xml` is provided for exactly this case, and lets you use `PEC` boundaries instead of needing absorbing ones for the substrate side.

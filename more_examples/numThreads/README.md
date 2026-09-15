@@ -15,7 +15,7 @@ numThreads = 8
 simulation_setup.runSimulation (excite_ports, FDTD, sim_path, model_basename, preview_only, numThreads=numThreads)      
 ```
 
-This parameter is optional, it defaults to automatic thread detection by openEMS, as know from previous workflow releases.  
+This parameter is optional, it defaults to automatic thread detection by openEMS, as known from previous workflow releases.  
 
 ```python
 simulation_setup.runSimulation (excite_ports, FDTD, sim_path, model_basename, preview_only)    
@@ -25,7 +25,7 @@ simulation_setup.runSimulation (excite_ports, FDTD, sim_path, model_basename, pr
 Setting numThreads=0 will also enable automatic thread detection by openEMS, instead of forcing a specific thread count.
 
 
-## New settings[] model synatx, as also known from the gds2palace workflow:
+## New settings[] model syntax, as also known from the gds2palace workflow:
 
 A new optional numThreads parameter can be specified in the settings[] list
 
