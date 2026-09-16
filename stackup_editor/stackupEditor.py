@@ -2514,9 +2514,11 @@ class StackupEditorWindow(QDialog):
             element = dielectric_elements.get(dielectric.name)
             if element is None or element.get("Reference"):
                 continue  # already Reference-based - leave untouched
+            own_gds_number = int(dielectric.gdsboundary) if dielectric.gdsboundary is not None else None
             candidate = self._nearest_reference_candidate(
                 dielectric.zmin, dielectric.name, dielectrics_list.dielectrics, [],
-                fallback_to_lowest_dielectric=False)
+                fallback_to_lowest_dielectric=False, own_gds_number=own_gds_number,
+                include_dielectric_bottom_edges=False)
             if candidate is None:
                 continue  # nothing below it - stays the natural implicit anchor at z=0
             candidate_name, candidate_edge, candidate_z = candidate
@@ -2542,7 +2544,7 @@ class StackupEditorWindow(QDialog):
                 continue  # already Reference-based - leave untouched
             candidate = self._nearest_reference_candidate(
                 metal.zmin, metal.name, dielectrics_list.dielectrics, metals_list.metals,
-                fallback_to_lowest_dielectric=True)
+                fallback_to_lowest_dielectric=True, own_gds_number=int(metal.layernum))
             if candidate is None:
                 continue  # no dielectric in the file at all - nothing sensible to reference
             candidate_name, candidate_edge, candidate_z = candidate
@@ -2556,18 +2558,42 @@ class StackupEditorWindow(QDialog):
         stackup_writer.stamp_reference_format_comment(root, stackup_reader.__version__)
 
     @staticmethod
-    def _nearest_reference_candidate(zmin, exclude_name, dielectrics, metals, fallback_to_lowest_dielectric):
+    def _nearest_reference_candidate(zmin, exclude_name, dielectrics, metals, fallback_to_lowest_dielectric,
+                                      own_gds_number=None, include_dielectric_bottom_edges=True):
         """Find the best Reference target for an element positioned at `zmin`: among every
-           other Dielectric's Top and Bottom edge, and every Layer's Top edge, the one with
-           the largest z that is still at or below `zmin` - i.e. the nearest thing below,
-           whether touching (gap 0) or not (e.g. a capacitor plate floating a small distance
-           above the metal below it). Both Dielectric edges are real candidates for different
-           reasons: another Dielectric's Top is where one stacks directly on the one below;
-           a Dielectric's own Bottom is where the lowest Layer *inside* it naturally sits.
+           other Dielectric's Top (and, for a Layer, Bottom) edge, and every Layer's Top edge,
+           the one with the largest z that is still at or below `zmin` - i.e. the nearest thing
+           below, whether touching (gap 0) or not (e.g. a capacitor plate floating a small
+           distance above the metal below it). A Dielectric's own Bottom edge is a real
+           candidate for a LAYER (that's where the lowest Layer *inside* it naturally sits,
+           e.g. a backside contact) - but never for another DIELECTRIC (see
+           include_dielectric_bottom_edges below), since two Dielectrics are never legitimately
+           related "bottom to bottom", only "top to bottom" (one stacks directly on the other).
            `metals` should be [] when converting a Dielectric (Reference on a Dielectric can
            only target another Dielectric, never a Layer). Dielectrics are checked before
-           metals, so an exact tie (both at the same z) prefers the Dielectric - more
-           fundamental/stable a target than an individual Layer.
+           metals, so an exact tie between a Dielectric and a Layer prefers the Dielectric -
+           more fundamental/stable a target than an individual Layer.
+
+           A multi-chiplet stackup (see util_stackup_reader.detect_chiplet_groups()) can have
+           several *different* candidates genuinely tied at the same qualifying z - e.g. a
+           Layer choosing between two different chiplets' own first Dielectric, both starting
+           at the shared interposer's top. Plain z-matching can't tell those apart, so when
+           more than one same-kind candidate ties for best z, own_gds_number (this element's
+           own GDS layer number - Layer= for a Layer, Boundary= for a Dielectric, if it has
+           one) is used to prefer whichever tied candidate's own GDS number (same rule) is
+           numerically closest, on the theory that layers/dielectrics belonging to the same
+           chiplet were likely drawn with nearby GDS layer numbers. Falls back to the original
+           first-candidate-found behavior whenever there's no usable number on either side
+           (e.g. converting a Dielectric with no Boundary=) - never worse than the old
+           behavior, only better when there's an actual number to compare.
+
+           Known limitation, accepted rather than solved: this only disambiguates an actual
+           TIE. It doesn't help when a different chiplet's element is simply the closest
+           candidate with no tie at all - e.g. one chiplet's internal cumulative thickness
+           happening to land exactly on another chiplet's unrelated Layer z, which then wins
+           outright on proximity alone, regardless of GDS numbers, before this tie-break ever
+           runs. Solving that would need chiplet membership to already be known while doing
+           the very conversion that establishes it - a much bigger change than this one.
         Args:
             zmin (float): the element's own resolved absolute Zmin
             exclude_name (string): don't consider a candidate with this name (self)
@@ -2578,30 +2604,60 @@ class StackupEditorWindow(QDialog):
                 Bottom edge with whatever (possibly negative) offset that implies - used for
                 Layers (e.g. a backside ground plane below the substrate); Dielectrics have
                 no such fallback, since there both being asked here is what defines "lowest"
+            own_gds_number (int, optional): this element's own GDS layer number, for the
+                tie-break above - None (the default) skips straight to the fallback
+            include_dielectric_bottom_edges (bool): whether another Dielectric's Bottom edge
+                is a candidate at all - True (the default) for a Layer; the Dielectric
+                conversion call site passes False (see docstring above). Without this, two
+                chiplet Dielectrics sharing the same zmin (the branch point: both start at
+                the shared interposer's top) would spuriously tie against *each other's*
+                Bottom edge - which happens to sit at that exact same z purely because they
+                start there too - competing with (and, once a GDS-number tie-break exists,
+                sometimes beating) the actually-correct shared interposer Top-edge target.
         Returns:
             (name, edge, z) of the chosen candidate, or None if there isn't one
         """
         epsilon = 1e-5
-        best = None  # (z, name, edge)
+        candidates = []  # each: (z, name, edge, gds_number_or_None, is_dielectric)
         for dielectric in dielectrics:
             if dielectric.name == exclude_name:
                 continue
-            for edge, z in (("Top", dielectric.zmax), ("Bottom", dielectric.zmin)):
-                if z <= zmin + epsilon and (best is None or z > best[0]):
-                    best = (z, dielectric.name, edge)
+            dielectric_gds = int(dielectric.gdsboundary) if dielectric.gdsboundary is not None else None
+            edges = [("Top", dielectric.zmax)]
+            if include_dielectric_bottom_edges:
+                edges.append(("Bottom", dielectric.zmin))
+            for edge, z in edges:
+                if z <= zmin + epsilon:
+                    candidates.append((z, dielectric.name, edge, dielectric_gds, True))
         for metal in metals:
             if metal.name == exclude_name:
                 continue
             z = metal.zmax
-            if z <= zmin + epsilon and (best is None or z > best[0]):
-                best = (z, metal.name, "Top")
+            if z <= zmin + epsilon:
+                candidates.append((z, metal.name, "Top", int(metal.layernum), False))
 
-        if best is not None:
-            return best[1], best[2], best[0]
-        if fallback_to_lowest_dielectric and dielectrics:
-            lowest = min(dielectrics, key=lambda d: d.zmin)
-            return lowest.name, "Bottom", lowest.zmin
-        return None
+        if not candidates:
+            if fallback_to_lowest_dielectric and dielectrics:
+                lowest = min(dielectrics, key=lambda d: d.zmin)
+                return lowest.name, "Bottom", lowest.zmin
+            return None
+
+        best_z = max(c[0] for c in candidates)
+        tied = [c for c in candidates if best_z - c[0] <= epsilon]
+
+        # unchanged rule: an exact Dielectric/Layer tie prefers the Dielectric
+        if any(c[4] for c in tied):
+            tied = [c for c in tied if c[4]]
+
+        # still-tied same-kind candidates: prefer GDS-number proximity, but only when
+        # there's actually a number on both sides to compare - see docstring above
+        if len(tied) > 1 and own_gds_number is not None:
+            numbered = [c for c in tied if c[3] is not None]
+            if numbered:
+                tied = [min(numbered, key=lambda c: abs(c[3] - own_gds_number))]
+
+        chosen = tied[0]  # unchanged fallback: first survivor in original (file) order
+        return chosen[1], chosen[2], chosen[0]
 
     # ---------- convert to legacy format ----------
 
