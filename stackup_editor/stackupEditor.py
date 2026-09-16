@@ -1250,6 +1250,7 @@ class StackupEditorWindow(QDialog):
             not_applicable_fn=_material_not_applicable,
             blank_if_default_fn=_material_blank_if_default,
             reload_on_attr_change={"Type"},
+            pre_set_attr_fn=self._handle_material_name_change,
             header_tooltips={
                 attr: "Numeric value, or \"=expression\" referencing a Variable"
                 for attr in ("Permittivity", "DielectricLossTangent", "Conductivity", "Rs",
@@ -1275,7 +1276,7 @@ class StackupEditorWindow(QDialog):
             # these four drive the resulting-Zmin/Zmax computation and the
             # position-mode gray-out state, so they must live-refresh
             reload_on_attr_change={"Thickness", "Zmin", "Zmax", "Reference", "ReferenceEdge"},
-            pre_set_attr_fn=self._handle_dielectric_thickness_change,
+            pre_set_attr_fn=self._handle_dielectric_attr_change,
             header_tooltips={
                 "Zmin": "Absolute position, or offset from Reference if set - or \"=expression\" referencing a Variable",
                 "Zmax": "Absolute position, or offset from Reference if set - or \"=expression\" referencing a Variable",
@@ -1298,6 +1299,7 @@ class StackupEditorWindow(QDialog):
             compute_fn=self._compute_layer_zpositions_and_thickness,
             # Thickness/ResultZmin/ResultZmax are derived from these - must live-refresh
             reload_on_attr_change={"Zmin", "Zmax", "Reference", "ReferenceEdge"},
+            pre_set_attr_fn=self._handle_layer_name_change,
             header_tooltips={
                 "Zmin": "Absolute position, or offset from Reference if set - or \"=expression\" referencing a Variable",
                 "Zmax": "Absolute position, or offset from Reference if set - or \"=expression\" referencing a Variable",
@@ -1550,6 +1552,123 @@ class StackupEditorWindow(QDialog):
             "Material": materials[0] if materials else "",
             "Thickness": "1.0",
         }
+
+    def _handle_rename_with_cascade(self, element, new_value, ref_specs, entity_label, editors_to_reload):
+        """Shared rename-cascade logic for a "Name" edit on a Material/Dielectric/Layer that
+           other elements may point back at by name (Material=/Reference=): applies the
+           rename itself unconditionally, then - if anything still refers to the OLD name -
+           offers to update those references too, same confirm-then-cascade shape as
+           _handle_dielectric_thickness_change() below.
+        Args:
+            element (xml.etree.ElementTree.Element): the element being renamed - still
+              holds its old Name (this is called from a pre_set_attr_fn, before the normal
+              attribute-set path would have applied new_value)
+            new_value (string): the new Name
+            ref_specs (list of (list of Element, string)): (container, ref_attr) pairs to
+              scan for elements whose ref_attr attribute equals the OLD name - e.g.
+              [(dielectrics, "Material"), (layers, "Material")] for a material rename
+            entity_label (string): "material"/"dielectric"/"layer", for the dialog text
+            editors_to_reload (list of ElementTableEditor): reloaded (so the table reflects
+              the cascaded values) only if the user accepts the cascade
+        """
+        old_name = element.get("Name")
+        # mirror ElementTableEditor._set_attr()'s own normal-path handling of an
+        # empty value (delete the attribute, don't store Name="") - that path is
+        # skipped entirely once this hook returns True, so it's this hook's job
+        if new_value:
+            element.set("Name", new_value)
+        elif "Name" in element.attrib:
+            del element.attrib["Name"]
+        # an empty new_value can't be a valid reference target - never offer to
+        # point existing References/Materials at "", that would just corrupt them
+        if not old_name or not new_value or old_name == new_value:
+            return
+
+        referrers = [(ref_attr, candidate)
+                     for container, ref_attr in ref_specs
+                     for candidate in container
+                     if candidate is not element and candidate.get(ref_attr) == old_name]
+        if not referrers:
+            return
+
+        names = ", ".join(referring_el.get("Name") or "<unnamed>" for _, referring_el in referrers)
+        reply = QMessageBox.question(
+            self, f"Update references to this {entity_label}?",
+            f"{len(referrers)} element(s) reference this {entity_label} by its old name "
+            f"'{old_name}':\n{names}\n\n"
+            f"Update them to use the new name '{new_value}'?",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            for ref_attr, referring_el in referrers:
+                referring_el.set(ref_attr, new_value)
+            # deferred, same reasoning/pattern as ElementTableEditor._set_attr()'s own
+            # reload_on_attr_change branch: this may still be firing from inside the
+            # very cell/item whose own itemChanged signal triggered this rename ("Name"
+            # isn't in reload_on_attr_change, so that existing deferral doesn't cover
+            # this path) - reload() tearing down the table synchronously here would
+            # destroy that item while its signal is still dispatching.
+            QTimer.singleShot(0, self._guarded(
+                lambda editors=editors_to_reload: [editor.reload() for editor in editors]))
+
+    def _handle_material_name_change(self, element, attr, new_value):
+        """pre_set_attr_fn for the Materials editor: renaming a material that's still
+           referenced by Material="<old name>" on any Dielectric/Layer offers to update
+           those references to the new name too - see _handle_rename_with_cascade().
+        """
+        if attr != "Name":
+            return False
+        root = self.tree.getroot()
+        self._handle_rename_with_cascade(
+            element, new_value,
+            ref_specs=[(self._dielectrics_container(root), "Material"),
+                       (self._layers_container(root), "Material")],
+            entity_label="material",
+            editors_to_reload=[self.dielectrics_editor, self.layers_editor])
+        return True
+
+    def _handle_dielectric_name_change(self, element, attr, new_value):
+        """pre_set_attr_fn (Name branch) for the Dielectrics editor: renaming a dielectric
+           that's still targeted by Reference="<old name>" on any other Dielectric or Layer
+           (a Layer's Reference can target either) offers to update those references to the
+           new name too - see _handle_rename_with_cascade().
+        """
+        if attr != "Name":
+            return False
+        root = self.tree.getroot()
+        self._handle_rename_with_cascade(
+            element, new_value,
+            ref_specs=[(self._dielectrics_container(root), "Reference"),
+                       (self._layers_container(root), "Reference")],
+            entity_label="dielectric",
+            editors_to_reload=[self.dielectrics_editor, self.layers_editor])
+        return True
+
+    def _handle_dielectric_attr_change(self, element, attr, new_value):
+        """pre_set_attr_fn for the Dielectrics editor - dispatches to whichever of the two
+           attrs it actually cares about, since ElementTableEditor only takes one callback.
+        """
+        if attr == "Name":
+            return self._handle_dielectric_name_change(element, attr, new_value)
+        if attr == "Thickness":
+            return self._handle_dielectric_thickness_change(element, attr, new_value)
+        return False
+
+    def _handle_layer_name_change(self, element, attr, new_value):
+        """pre_set_attr_fn for the Layers editor: renaming a layer that's still targeted by
+           Reference="<old name>" on any other Layer offers to update those references to
+           the new name too - see _handle_rename_with_cascade(). A Dielectric's own
+           Reference can't target a Layer (see reference_choices_fn's docstring), so only
+           other Layers are ever real candidates here.
+        """
+        if attr != "Name":
+            return False
+        root = self.tree.getroot()
+        self._handle_rename_with_cascade(
+            element, new_value,
+            ref_specs=[(self._layers_container(root), "Reference")],
+            entity_label="layer",
+            editors_to_reload=[self.layers_editor])
+        return True
 
     def _handle_dielectric_thickness_change(self, element, attr, new_value):
         """pre_set_attr_fn for the Dielectrics editor: when a non-absolute (implicit-stacked
