@@ -76,11 +76,13 @@ else:
 # as part of the stackup_editor package, so relative import fails.
 if __package__ in (None, ""):
     from editor_common import (
-        VectorWidget, epsilon_to_color, default_stackup_dielectric_label, default_stackup_metal_label,
+        VectorWidget, ChipletSwitcher, epsilon_to_color,
+        default_stackup_dielectric_label, default_stackup_metal_label,
     )
 else:
     from .editor_common import (
-        VectorWidget, epsilon_to_color, default_stackup_dielectric_label, default_stackup_metal_label,
+        VectorWidget, ChipletSwitcher, epsilon_to_color,
+        default_stackup_dielectric_label, default_stackup_metal_label,
     )
 
 # QSettings scope for the "Open Recent" file list. Kept distinct from setupEM's own
@@ -1055,7 +1057,7 @@ class StackupPreviewWindow(QWidget):
     deleteLater() on this window instead of relying on Qt object-tree cleanup.
     """
 
-    def __init__(self, vector_widget, parent=None):
+    def __init__(self, vector_widget, parent=None, chiplet_switcher=None):
         super().__init__(parent, Qt.Window)
         self.setWindowTitle("Stackup Preview")
         self.resize(700, 900)
@@ -1063,6 +1065,8 @@ class StackupPreviewWindow(QWidget):
         # vector_widget is a QGraphicsView, already self-scrolling - no QScrollArea
         # wrapper needed (or wanted: it would nest a second set of scrollbars).
         layout = QVBoxLayout()
+        if chiplet_switcher is not None:
+            layout.addWidget(chiplet_switcher)
         layout.addWidget(vector_widget)
         self.setLayout(layout)
 
@@ -1448,6 +1452,8 @@ class StackupEditorWindow(QDialog):
             via_label_suffix_fn=self.MainWindow.stackup_via_label_suffix,
         )
         self.vector_widget.setMinimumSize(600, 800)
+        self.chiplet_switcher = ChipletSwitcher(self.vector_widget.set_active_chiplet)
+        self.vector_widget.set_chiplet_switcher(self.chiplet_switcher)
 
         # two-way sync between the preview graphics and the Dielectric Stack/Layers
         # tables: clicking a shape in the preview selects its row (and switches to
@@ -1470,7 +1476,7 @@ class StackupEditorWindow(QDialog):
         # created once and kept for the editor's lifetime, but deliberately with
         # no Qt parent (see StackupPreviewWindow docstring) - cleaned up explicitly
         # in closeEvent() below rather than via Qt's parent-child auto-delete
-        self.preview_window = StackupPreviewWindow(self.vector_widget)
+        self.preview_window = StackupPreviewWindow(self.vector_widget, chiplet_switcher=self.chiplet_switcher)
         self.preview_window.move(self.x() + self.width() + 20, self.y())
 
         if initial_filename and os.path.isfile(initial_filename):
@@ -2870,6 +2876,7 @@ class StackupEditorWindow(QDialog):
             # preview refresh.
             return
         self.vector_widget.refresh(materials_list, dielectrics_list, metals_list)
+        self.chiplet_switcher.set_groups(dielectrics_list.chiplet_groups)
 
     def _on_preview_element_selected(self, kind, name):
         """Preview -> table: a shape was clicked in the cross-section preview -

@@ -46,7 +46,7 @@ using the nearest two points beyond either end) without adding a new dependency.
 import numpy as np
 from PySide6.QtWidgets import (
     QWidget, QFrame, QGraphicsView, QGraphicsScene, QGraphicsItem, QGraphicsRectItem,
-    QToolTip,
+    QToolTip, QHBoxLayout, QLabel, QComboBox,
 )
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtCore import Qt, QRect, QRectF, Signal
@@ -180,7 +180,8 @@ def _build_layer_tooltip(metal):
 
 def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width, height,
                             dielectric_color_fn, dielectric_label_fn,
-                            metal_label_fn, via_label_suffix_fn):
+                            metal_label_fn, via_label_suffix_fn,
+                            active_chiplet_id=None):
     """Pure layout computation for the stackup cross-section preview - no QPainter/
     widget/scene involved. Returns (draw_calls, interactive_entries):
 
@@ -193,13 +194,50 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
     not a re-derivation of it, specifically to avoid subtly changing the visual layout.
 
     interactive_entries: one {"kind": "dielectric"|"layer", "key": name, "rect": QRectF,
-    "ref": dielectric_layer/metal_layer, "tooltip": str} dict per dielectric slab, metal,
-    or via box - used to build the transparent hoverable/selectable overlay items. "key" is
-    always the element's Name (unique within <Dielectrics>/<Layers> respectively), matching
-    what the stackup editor's row_elements look up by.
+    "ref": dielectric_layer/metal_layer, "tooltip": str, "chiplet_id": str|None} dict per
+    dielectric slab, metal, or via box - used to build the transparent hoverable/selectable
+    overlay items. "key" is always the element's Name (unique *within one chiplet's shown
+    subtree plus the interposer* - not guaranteed unique across different chiplets, which is
+    why VectorWidget's selection keying includes "chiplet_id" too), matching what the stackup
+    editor's row_elements look up by. "chiplet_id" is None for an interposer-sourced entry,
+    else the currently active chiplet's id (see active_chiplet_id below).
+
+    active_chiplet_id (str, optional): which chiplet (dielectrics_list.chiplet_groups.chiplets[i].id)
+    to show, for a stackup where detect_chiplet_groups() found more than one chiplet sharing a
+    common interposer base - the interposer's own Dielectrics/Layers are always shown in
+    addition, regardless of this argument. None picks the first detected chiplet. Ignored
+    (as if no chiplets existed) when dielectrics_list.chiplet_groups is missing or has no
+    chiplets - the ordinary, non-chiplet case, which renders exactly as before this parameter
+    was added.
     """
     draw_calls = []
     interactive_entries = []
+
+    # chiplet-aware filtering: with no branching detected (the ordinary case) or no
+    # chiplet_groups at all (e.g. an in-memory dielectrics_list built by hand rather than via
+    # read_substrate()/parse_substrate()), dielectrics_source/visible_layers preserve exactly
+    # today's behavior - every dielectric/metal is shown, nothing is filtered.
+    chiplet_groups = getattr(dielectrics_list, "chiplet_groups", None)
+    dielectrics_source = dielectrics_list.dielectrics
+    visible_layers = None   # None = no filtering; a set means "only these metals are visible"
+    active_chiplet = None
+    if chiplet_groups is not None and chiplet_groups.chiplets:
+        active_chiplet = next((c for c in chiplet_groups.chiplets if c.id == active_chiplet_id),
+                               chiplet_groups.chiplets[0])
+        visible_dielectrics = set(chiplet_groups.interposer_dielectrics) | set(active_chiplet.dielectrics)
+        visible_layers = set(chiplet_groups.interposer_layers) | set(active_chiplet.layers)
+        dielectrics_source = [d for d in dielectrics_list.dielectrics if d in visible_dielectrics]
+
+    def entry_chiplet_id(dielectric_or_metal):
+        # None (interposer) unless this element is part of the currently active chiplet's
+        # own subtree - deliberately checked by identity against the active chiplet's own
+        # lists rather than just "a chiplet exists", so an interposer-sourced entry (shown
+        # alongside the active chiplet) still correctly gets None
+        if active_chiplet is None:
+            return None
+        if dielectric_or_metal in active_chiplet.dielectrics or dielectric_or_metal in active_chiplet.layers:
+            return active_chiplet.id
+        return None
 
     # utility: flip y to have y=0 at bottom
     def flipy(y):
@@ -229,8 +267,26 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
         rect = QRect(x, y - h, w, h)
         draw_calls.append(("drawText", (rect, Qt.AlignVCenter | Qt.AlignLeft, text)))
 
+    # other chiplets sharing the active one's branch point (interposer dielectric) -
+    # non-empty exactly when there's a sibling chiplet not currently shown, which is
+    # when the "something sits beside this" gutter/stub below applies
+    sibling_chiplets = []
+    if active_chiplet is not None:
+        sibling_chiplets = [c for c in chiplet_groups.chiplets
+                            if c is not active_chiplet and c.branch_point is active_chiplet.branch_point]
+
     xmin = int(width * 0.02)
-    xmax = int(width * 0.98)
+    # sibling-chiplet stub geometry, decided here (not down where it's drawn) since
+    # xmax itself needs to leave exactly enough room for it - a fixed size relative
+    # to width, not "whatever's left of a separately-chosen gutter", so there's no
+    # left-over dead space between the stub and the canvas edge
+    STUB_WIDTH = int(width * 0.06)
+    STUB_RIGHT_MARGIN = int(width * 0.02)
+    # narrow the whole drawing slightly (a touch more on the right) to leave room for
+    # the sibling-chiplet stub below - applied globally (not just to the active
+    # chiplet's own rows) so every x-coordinate downstream (slab width, metal
+    # x-splits, via slots, text placement) stays consistent with no other change
+    xmax = int(width - STUB_WIDTH - STUB_RIGHT_MARGIN) if sibling_chiplets else int(width * 0.98)
 
     ymin = int(height * 0.025)
     ymax = int(height * 0.975)
@@ -248,7 +304,7 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
     # sits in the file - so reordering it there (e.g. Move Up/Down in the Dielectric
     # Stack tab) must not change where it's drawn here, even though it does change
     # dielectrics_list.dielectrics' own array order
-    dielectrics_bottom_up = sorted(dielectrics_list.dielectrics, key=lambda d: d.zmin)
+    dielectrics_bottom_up = sorted(dielectrics_source, key=lambda d: d.zmin)
     for dielectric in dielectrics_bottom_up:  # bottom up
         setPen(penBlack)
 
@@ -292,7 +348,7 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
     part_height = int((ymax - ymin) / (total_parts))
 
     y = ymin
-    w = xmax - ymin
+    w = xmax - xmin
 
     # we need to store data for original z position and the displayed y position
     stored_z = np.array([0])
@@ -309,6 +365,26 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
         else:
             material_string = 'INVALID MATERIAL REFERENCE: ' + dielectric.material
 
+        # adaptive left margin for this dielectric's metal boxes/side-labels: the
+        # dielectric name is drawn at xmin+5, and the per-metal "distance to
+        # boundary" labels below default to starting at xmetal-60 - for a short
+        # name (the common case, e.g. "SiO2"/"EPI") that's already well clear of
+        # the default xmin+120 metal-box margin, but a longer name (e.g. an
+        # auto-generated chiplet dielectric name) can run into that label and
+        # visually merge with it, especially in a short slab with few rows where
+        # the name's own vertically-centered position lands on the same row as
+        # one of those labels. Estimating the name's rendered width and widening
+        # the margin only when needed keeps every existing short-name stackup
+        # pixel-identical while fixing the long-name case generally, rather than
+        # special-casing this one dielectric. A plain character-count estimate
+        # (not QFontMetrics) deliberately keeps this function usable with no
+        # QApplication/QGuiApplication instance yet constructed - QFontMetrics
+        # requires one and otherwise crashes the process outright (not a
+        # catchable Python exception).
+        name_width = len(dielectric.name) * 7 + 10
+        metal_box_left_margin = max(120, name_width + 75)
+        extra_margin = metal_box_left_margin - 120
+
         setPen(penBlack)
         setBrush(color)
         drawRect(xmin, flipy(y), w, -h)
@@ -318,6 +394,7 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
             "rect": QRectF(xmin, flipy(y), w, -h).normalized(),
             "ref": dielectric,
             "tooltip": _build_dielectric_tooltip(dielectric),
+            "chiplet_id": entry_chiplet_id(dielectric),
         })
         drawText_left(xmin + 5, flipy(y), w, h, dielectric.name)
         drawText_right(xmin, flipy(y), w - 5, h, material_string)
@@ -348,15 +425,15 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
                 # check if next metal is at same zmin
                 next_at_same_zmin = False
                 previous_at_same_zmin = False
-                xmetal = xmin + 120
-                wmetal = w - 200
+                xmetal = xmin + metal_box_left_margin
+                wmetal = w - 200 - extra_margin
 
                 if n < len(metals_inside) - 1:
                     next_metal = metals_inside[n + 1]
                     if abs(next_metal.zmin - metal.zmin) < 0.001:
                         next_at_same_zmin = True
-                        xmetal = xmin + 120
-                        wmetal = int(w / 2) - 100
+                        xmetal = xmin + metal_box_left_margin
+                        wmetal = int(w / 2) - 100 - extra_margin
                 else:
                     next_metal = None
 
@@ -419,6 +496,7 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
                     "rect": QRectF(xmetal, flipy(ymetal), wmetal, -int(height_box)).normalized(),
                     "ref": metal,
                     "tooltip": _build_layer_tooltip(metal),
+                    "chiplet_id": entry_chiplet_id(metal),
                 })
 
                 setPen(penBlack)
@@ -503,6 +581,48 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
         # below. Linear interpolation/extrapolation is bounded by construction.
         z_to_y = _LinearInterpExtrapolate(z_sorted, y_sorted)
 
+        if sibling_chiplets:
+            # visual reminder that another chiplet sits beside the one currently shown,
+            # starting at their shared interface (the branch point dielectric's top) -
+            # deliberately schematic: a short, empty, open-topped outline in the gutter
+            # reserved above (xmax narrowed for this), not a to-scale/detailed rendering
+            # of the sibling. Open top (no top line) reads as "truncated - continues
+            # beyond view" rather than a small closed box that happens to be there. "+n"
+            # (n = other sibling chiplets not currently shown) is the only content inside -
+            # no interior geometry, matching the "not in detail" ask.
+            STUB_HEIGHT = 56
+            stub_x = xmax   # flush against the main column's right edge - reads as
+                             # growing out of it, right at the shared boundary line
+                             # already drawn there, rather than a disconnected box
+            stub_y_bottom = flipy(z_to_y(active_chiplet.branch_point.zmax))
+            stub_y_top = stub_y_bottom - STUB_HEIGHT
+            setPen(QPen(penGray.color(), 1, Qt.DashLine))
+            setBrush(Qt.NoBrush)
+            drawLine(stub_x, stub_y_bottom, stub_x, stub_y_top)                              # left
+            drawLine(stub_x + STUB_WIDTH, stub_y_bottom, stub_x + STUB_WIDTH, stub_y_top)     # right
+            drawLine(stub_x, stub_y_bottom, stub_x + STUB_WIDTH, stub_y_bottom)               # bottom
+            # top edge deliberately omitted - see docstring above
+
+            setPen(penGray)
+            text_rect = QRect(int(stub_x), int(stub_y_top), int(STUB_WIDTH), int(STUB_HEIGHT / 2))
+            draw_calls.append(("drawText", (text_rect, Qt.AlignCenter, f"+{len(sibling_chiplets)}")))
+
+            # sketched (outline-only, no filled arrowhead) left/right chevrons hinting
+            # at the Left/Right keyboard shortcut that steps through chiplets
+            # (VectorWidget.keyPressEvent) - purely a discoverability nudge, not
+            # clickable itself, so plain open "<"/">" strokes are enough; no need for
+            # a filled/solid arrow that would suggest a button.
+            setPen(QPen(penGray.color(), 1))
+            chevron_cy = stub_y_bottom - 14   # bottom band, clear of the "+n" text above
+            chevron_size = 5
+            chevron_gap = 8
+            left_cx = stub_x + STUB_WIDTH / 2 - chevron_gap
+            right_cx = stub_x + STUB_WIDTH / 2 + chevron_gap
+            drawLine(left_cx + chevron_size, chevron_cy - chevron_size, left_cx, chevron_cy)
+            drawLine(left_cx, chevron_cy, left_cx + chevron_size, chevron_cy + chevron_size)
+            drawLine(right_cx - chevron_size, chevron_cy - chevron_size, right_cx, chevron_cy)
+            drawLine(right_cx, chevron_cy, right_cx - chevron_size, chevron_cy + chevron_size)
+
         # next we draw the vias, based on the screen position of metals that we have stored
         # via position alternates between 3 positions along x axis
         pos = 1
@@ -511,6 +631,8 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
         setBrush(QColor(136, 192, 200, 80))
         for metal in metals_list.metals:
             if metal.is_via or metal.is_dielectric:
+                if visible_layers is not None and metal not in visible_layers:
+                    continue
 
                 material = materials_list.get_by_name(metal.material)
                 label_suffix = via_label_suffix_fn(metal, material)
@@ -537,6 +659,7 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
                     "rect": QRectF(xvia, flipy(y1), w, -h).normalized(),
                     "ref": metal,
                     "tooltip": _build_layer_tooltip(metal),
+                    "chiplet_id": entry_chiplet_id(metal),
                 })
                 drawTextAt(xvia + 5, flipy(y1 + 5), f"{metal.name} ({metal.layernum})" + label_suffix)
 
@@ -586,7 +709,7 @@ class InteractiveRegionItem(QGraphicsRectItem):
 
     _HIGHLIGHT_PEN = QPen(QColor(255, 140, 0), 3)
 
-    def __init__(self, rect, kind, key, ref, tooltip):
+    def __init__(self, rect, kind, key, ref, tooltip, chiplet_id=None):
         super().__init__(rect)
         self.setPen(Qt.NoPen)
         self.setBrush(Qt.NoBrush)
@@ -595,6 +718,10 @@ class InteractiveRegionItem(QGraphicsRectItem):
         self.kind = kind          # "dielectric" or "layer"
         self.key = key            # element Name, matching row_elements lookup in the editor
         self.ref = ref            # dielectric_layer or metal_layer instance
+        # None (interposer) or the active chiplet's id - only used to build VectorWidget's
+        # _item_lookup compound key (see _rebuild_scene()), not part of the external
+        # elementSelected/select_element(kind, name) contract, which stays plain-name
+        self.chiplet_id = chiplet_id
 
     def paint(self, painter, option, widget=None):
         # unselected: draw nothing, StackupBackgroundItem already drew the real
@@ -645,8 +772,24 @@ class VectorWidget(QGraphicsView):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setFrameShape(QFrame.NoFrame)
+        # StrongFocus (not the QGraphicsView default of NoFocus/ClickFocus ambiguity
+        # across styles) so a click into the view reliably grabs keyboard focus - needed
+        # for keyPressEvent()'s Left/Right chiplet-switching below to ever fire
+        self.setFocusPolicy(Qt.StrongFocus)
 
-        self._item_lookup = {}   # (kind, key) -> InteractiveRegionItem
+        self._item_lookup = {}         # (kind, chiplet_id, key) -> InteractiveRegionItem
+        self._item_by_kind_name = {}   # (kind, key) -> InteractiveRegionItem, for select_element()
+        # which chiplet to show, for a stackup with more than one detected (see
+        # compute_stackup_layout()'s active_chiplet_id) - None means "let
+        # compute_stackup_layout() pick the first one", not "no chiplets"; irrelevant
+        # (ignored) for an ordinary, non-chiplet stackup
+        self._active_chiplet_id = None
+        # set via set_chiplet_switcher() by whoever constructs this widget, once its
+        # own ChipletSwitcher exists too - lets Left/Right (see keyPressEvent below)
+        # drive the same single source of truth (the switcher's combo index) as
+        # clicking the combo directly does, instead of a second, separately-tracked
+        # "current chiplet" that could drift out of sync with the combo's own display
+        self._chiplet_switcher = None
         scene = QGraphicsScene(self)
         self.setScene(scene)
         scene.selectionChanged.connect(self._on_scene_selection_changed)
@@ -664,10 +807,39 @@ class VectorWidget(QGraphicsView):
         self.metals_list = metals_list
         self._rebuild_scene()
 
+    def set_active_chiplet(self, chiplet_id):
+        """Switches which chiplet is shown (called by a ChipletSwitcher combo box) and
+        rebuilds the scene. A no-op-safe call on a stackup with 0 or 1 chiplets - it just
+        gets ignored by compute_stackup_layout(), same as any other chiplet_id would be
+        for such a file.
+        """
+        self._active_chiplet_id = chiplet_id
+        self._rebuild_scene()
+
+    def set_chiplet_switcher(self, chiplet_switcher):
+        """Links this widget to its ChipletSwitcher combo box, so Left/Right (see
+        keyPressEvent()) can step it - called once by whichever window constructs both
+        (see StackupEditorWindow), right after building the switcher itself with this
+        widget's set_active_chiplet as its callback.
+        """
+        self._chiplet_switcher = chiplet_switcher
+
+    def keyPressEvent(self, event):
+        if self._chiplet_switcher is not None and event.key() in (Qt.Key_Left, Qt.Key_Right):
+            self._chiplet_switcher.step(-1 if event.key() == Qt.Key_Left else 1)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
     def _rebuild_scene(self):
-        # keep whatever was selected (by identity of (kind, key), not by item, since
-        # every item is recreated below) selected across the rebuild, so an edit to
-        # the currently-selected layer doesn't make its preview highlight vanish
+        # keep whatever was selected (by identity of (kind, chiplet_id, key), not by
+        # item, since every item is recreated below) selected across the rebuild, so an
+        # edit to the currently-selected layer doesn't make its preview highlight
+        # vanish. Using the chiplet_id-qualified triple (not just (kind, key)) means a
+        # selection made in one chiplet is deliberately NOT restored after switching to
+        # a different chiplet - even if both happen to have a same-named element -
+        # since re-selecting "the same name in a different, unrelated chiplet" would be
+        # surprising, not helpful.
         previously_selected = self._selected_key()
 
         # compute_stackup_layout() is computed directly against the viewport's actual
@@ -684,20 +856,23 @@ class VectorWidget(QGraphicsView):
         scene = self.scene()
         scene.clear()
         self._item_lookup = {}
+        self._item_by_kind_name = {}
 
         draw_calls, interactive_entries = compute_stackup_layout(
             self.materials_list, self.dielectrics_list, self.metals_list,
             width, height,
             self.dielectric_color_fn, self.dielectric_label_fn,
-            self.metal_label_fn, self.via_label_suffix_fn)
+            self.metal_label_fn, self.via_label_suffix_fn,
+            active_chiplet_id=self._active_chiplet_id)
 
         scene.addItem(StackupBackgroundItem(draw_calls, width, height))
 
         for entry in interactive_entries:
             item = InteractiveRegionItem(entry["rect"], entry["kind"], entry["key"],
-                                          entry["ref"], entry["tooltip"])
+                                          entry["ref"], entry["tooltip"], entry["chiplet_id"])
             scene.addItem(item)
-            self._item_lookup[(entry["kind"], entry["key"])] = item
+            self._item_lookup[(entry["kind"], entry["chiplet_id"], entry["key"])] = item
+            self._item_by_kind_name[(entry["kind"], entry["key"])] = item
 
         scene.setSceneRect(0, 0, width, height)
 
@@ -705,9 +880,9 @@ class VectorWidget(QGraphicsView):
             self._item_lookup[previously_selected].setSelected(True)
 
     def _selected_key(self):
-        for key, item in self._item_lookup.items():
+        for triple, item in self._item_lookup.items():
             if item.isSelected():
-                return key
+                return triple
         return None
 
     def _on_scene_selection_changed(self):
@@ -727,7 +902,7 @@ class VectorWidget(QGraphicsView):
         selection, so this doesn't bounce back into elementSelected/the editor's own
         selection-changed handling.
         """
-        item = self._item_lookup.get((kind, name))
+        item = self._item_by_kind_name.get((kind, name))
         if self.scene().selectedItems() == ([item] if item is not None else []):
             return
         self.scene().clearSelection()
@@ -737,3 +912,91 @@ class VectorWidget(QGraphicsView):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._rebuild_scene()
+
+
+class ChipletSwitcher(QWidget):
+    """Combo box + "Chiplet N of M" label for picking which chiplet a Stackup Preview
+    shows, for a stackup where dielectric_layers_list.detect_chiplet_groups() found more
+    than one chiplet sharing a common interposer base (see util_stackup_reader.py). Hidden
+    entirely (never even shown) when there are 0 or 1 chiplet groups.
+    """
+
+    def __init__(self, on_chiplet_changed):
+        """Args:
+            on_chiplet_changed (callable): called with a chiplet id (str) whenever the
+              combo box selection changes - wire this straight to a VectorWidget's
+              set_active_chiplet().
+        """
+        super().__init__()
+        self._on_chiplet_changed = on_chiplet_changed
+        self._chiplet_ids = []
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.label = QLabel("")
+        layout.addWidget(self.label)
+        self.combo = QComboBox()
+        self.combo.currentIndexChanged.connect(self._on_index_changed)
+        layout.addWidget(self.combo, 1)
+        self.setVisible(False)
+
+    def set_groups(self, groups):
+        """Call whenever the stackup is (re)loaded - groups is a stackup's
+        dielectrics_list.chiplet_groups (may be None, or have zero/one chiplets, in which
+        case this stays/becomes hidden and does nothing else).
+
+        In the Stackup Editor this runs after every single edit (see _refresh_preview()),
+        not just an actual file (re)load - so it keeps showing whichever chiplet was
+        already active, by id, if that id still exists in the new grouping, rather than
+        always snapping back to the first one and disorienting the user mid-edit. Falls
+        back to the first chiplet only when there was no previous selection or it no
+        longer exists (e.g. that chiplet was just renamed or removed).
+        """
+        chiplets = groups.chiplets if groups is not None else []
+        new_ids = [chiplet.id for chiplet in chiplets]
+
+        previous_id = (self._chiplet_ids[self.combo.currentIndex()]
+                       if self._chiplet_ids and 0 <= self.combo.currentIndex() < len(self._chiplet_ids)
+                       else None)
+        self._chiplet_ids = new_ids
+        index = self._chiplet_ids.index(previous_id) if previous_id in self._chiplet_ids else 0
+
+        # setCurrentIndex() is also kept inside the signals-blocked region (not just
+        # clear()/addItems()) - whether it actually changes anything is unpredictable
+        # (Qt only emits when the resulting index differs from whatever clear()/
+        # addItems() already left it at), so relying on it to reach _on_index_changed()
+        # would sometimes fire the update and sometimes silently not; the explicit calls
+        # below every time this method runs are the one reliable path instead.
+        self.combo.blockSignals(True)
+        self.combo.clear()
+        self.combo.addItems(self._chiplet_ids)
+        if self._chiplet_ids:
+            self.combo.setCurrentIndex(index)
+        self.combo.blockSignals(False)
+
+        self.setVisible(len(chiplets) > 1)
+        if chiplets:
+            self._update_label(index, len(chiplets))
+            self._on_chiplet_changed(self._chiplet_ids[index])
+
+    def _on_index_changed(self, index):
+        if index < 0 or index >= len(self._chiplet_ids):
+            return
+        self._update_label(index, len(self._chiplet_ids))
+        self._on_chiplet_changed(self._chiplet_ids[index])
+
+    def _update_label(self, index, total):
+        self.label.setText(f"Chiplet {index + 1} of {total}:")
+
+    def step(self, direction):
+        """Moves the combo box by one chiplet, wrapping around at either end - called by
+        VectorWidget.keyPressEvent() for Left(-1)/Right(+1). Goes through
+        setCurrentIndex() (not a direct call to the on_chiplet_changed callback), so this
+        stays the single source of truth: the combo's own display always matches what's
+        actually shown, however the switch was triggered. A no-op with 0-1 chiplets,
+        same as the combo being hidden then.
+        """
+        if len(self._chiplet_ids) < 2:
+            return
+        new_index = (self.combo.currentIndex() + direction) % len(self._chiplet_ids)
+        self.combo.setCurrentIndex(new_index)
