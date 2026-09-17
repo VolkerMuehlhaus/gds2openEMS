@@ -57,7 +57,7 @@
 #              addGeometry_to_CSX() in util_simulation_setup.py for where the reserved name is
 #              resolved into a literal ideal-conductor CSX.AddMetal(...) construct
 
-__version__ = "1.9.0"
+__version__ = "1.9.1"
 
 import os
 import math
@@ -1232,6 +1232,7 @@ class metal_layers_list:
     """
     self.metals = []      # list with conductor objects
     self.lowest = None    # metal with smallest zmin value
+    self.highest = None   # metal with largest zmax value
     self.orphan_layers = []  # list with layers that have no direct neighbor above or below
     self.derived_layers = derived_layers_list()  # empty by default, populated by read_substrate() if XML has a DerivedLayers section
 
@@ -1380,6 +1381,13 @@ class metal_layers_list:
        since both chiplets typically start from the same interposer base. None (the
        default) preserves the original unscoped behavior exactly.
     """
+    if not self.metals:
+      # nothing to evaluate for a stackup with no Layers yet (e.g. a brand-new,
+      # not-yet-populated stackup in the editor) - leave lowest/highest/
+      # orphan_layers at their __init__ defaults instead of indexing into an
+      # empty list
+      return
+
     # sort the list by zmin of each metal
     self.metals.sort(key=lambda metal: metal.zmin)
     # metal with lowest zmin value
