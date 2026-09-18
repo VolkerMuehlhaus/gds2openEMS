@@ -56,8 +56,14 @@
 #              conductor/via/sheet layers without any matching <Materials> entry; see
 #              addGeometry_to_CSX() in util_simulation_setup.py for where the reserved name is
 #              resolved into a literal ideal-conductor CSX.AddMetal(...) construct
+# 18 Sep 2026: added dielectric_layers_list.find_missing_chiplet_boundaries()/
+#              find_missing_chiplet_boundary_warnings(): once a stackup branches into
+#              multiple chiplets, an explicit Boundary= is needed on both the shared branch
+#              point and each chiplet's own root Dielectric - unlike a single-chiplet stackup,
+#              there's no longer a single "whole GDS extent" fallback that means anything for
+#              either side of the branch
 
-__version__ = "1.9.3"
+__version__ = "1.9.4"
 
 import os
 import math
@@ -1019,6 +1025,47 @@ class dielectric_layers_list:
     return [f"Dielectric '{a.name}' (z={a.zmin:.4f}..{a.zmax:.4f}) overlaps "
             f"'{b.name}' (z={b.zmin:.4f}..{b.zmax:.4f})"
             for a, b in self.find_z_overlap_pairs()]
+
+
+  def find_missing_chiplet_boundaries (self):
+    """Returns the dielectric_layer objects that need a Boundary= GDS layer number but don't
+       have one: each detected chiplet's branch point (the shared interposer Dielectric it
+       references) and each chiplet's own root Dielectric (the one with
+       Reference=<branch_point.name>). In a single-chiplet/non-chiplet stackup, Boundary is
+       genuinely optional (the GDSII reader can fall back to the whole GDS extent), but once a
+       stackup branches into multiple chiplets sharing one interposer, an explicit Boundary is
+       needed on both sides of the branch to know which polygons belong to the shared base and
+       which belong to each chiplet - there's no longer a single "whole GDS extent" that means
+       anything. A branch point referenced by 2+ chiplets is only checked once (same underlying
+       Dielectric object). Call only after chiplet_groups has been set (i.e. after
+       detect_chiplet_groups() has run).
+    Returns:
+        list of dielectric_layer: branch points/chiplet roots missing Boundary=, empty if none
+        or if this stackup has no detected chiplets
+    """
+    if self.chiplet_groups is None:
+      return []
+    missing = []
+    seen_branch_points = set()
+    for group in self.chiplet_groups.chiplets:
+      branch_point = group.branch_point
+      if id(branch_point) not in seen_branch_points:
+        seen_branch_points.add(id(branch_point))
+        if branch_point.gdsboundary is None:
+          missing.append(branch_point)
+      if group.root.gdsboundary is None:
+        missing.append(group.root)
+    return missing
+
+
+  def find_missing_chiplet_boundary_warnings (self):
+    """Human-readable warning strings, one per element from find_missing_chiplet_boundaries().
+    Returns:
+        list of str: one warning per Dielectric missing a required Boundary=, empty if none
+    """
+    return [f"Dielectric '{d.name}' has no Boundary= layer number - required once a stackup "
+            f"branches into chiplets, to compute the correct bounding box for each region"
+            for d in self.find_missing_chiplet_boundaries()]
 
 
   def detect_chiplet_groups (self, metals_list):

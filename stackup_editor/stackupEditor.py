@@ -1127,6 +1127,11 @@ class StackupEditorWindow(QDialog):
         # Save time (see _maybe_offer_explicit_dielectric_references())
         self._asked_about_implicit_dielectric_references = False
 
+        # asked once per loaded/new file (reset in new_file()/_load_file()): whether to add a
+        # shared Variable for a chiplet branch point/root Dielectric missing Boundary= at
+        # Save time (see _maybe_offer_chiplet_boundary_variable())
+        self._asked_about_chiplet_boundary = False
+
         # schemaVersion as of the last successful load/save (reset in new_file()/
         # _load_file(), refreshed in _save_to() on success) - lets save() notice when a
         # plain Save would silently upgrade an old-format ("2.0") file on disk to the
@@ -2076,6 +2081,7 @@ class StackupEditorWindow(QDialog):
         self.current_filename = None
         self._set_filename_label("(new, unsaved)")
         self._asked_about_implicit_dielectric_references = False
+        self._asked_about_chiplet_boundary = False
         self._loaded_schema_version = self.tree.getroot().get("schemaVersion")
         self._reload_all_editors()
         self._reset_undo_baseline()
@@ -2097,6 +2103,7 @@ class StackupEditorWindow(QDialog):
         self.current_filename = filename
         self._set_filename_label(filename)
         self._asked_about_implicit_dielectric_references = False
+        self._asked_about_chiplet_boundary = False
         self._loaded_schema_version = self.tree.getroot().get("schemaVersion")
         self._reload_all_editors()
         self._reset_undo_baseline()
@@ -2136,6 +2143,7 @@ class StackupEditorWindow(QDialog):
         self.current_filename = None
         self._set_filename_label(f"(imported from {source_label}, unsaved)")
         self._asked_about_implicit_dielectric_references = False
+        self._asked_about_chiplet_boundary = False
         self._loaded_schema_version = self.tree.getroot().get("schemaVersion")
         self._reload_all_editors()
         self._reset_undo_baseline()
@@ -2320,6 +2328,55 @@ class StackupEditorWindow(QDialog):
             self.dielectrics_editor.reload()
             self.layers_editor.reload()
 
+    def _maybe_offer_chiplet_boundary_variable(self, root):
+        """Called once per file per editing session, right before Save actually writes the
+           file: if this stackup branches into multiple chiplets and any branch point or
+           chiplet root Dielectric has no Boundary= layer number, offer to add one shared
+           Variable and reference it as Boundary= on all of them - an explicit Boundary is
+           needed on both sides of a chiplet branch to know which GDS polygons belong to the
+           shared base and which belong to each chiplet (see
+           dielectric_layers_list.find_missing_chiplet_boundaries()). The user still has to
+           fill in the actual GDS layer number afterward on the Variables tab - this only
+           gets every affected Dielectric pointed at one shared place to set it.
+        """
+        if self._asked_about_chiplet_boundary:
+            return
+        self._asked_about_chiplet_boundary = True
+
+        try:
+            materials_list, dielectrics_list, metals_list = stackup_reader.parse_substrate(root)
+        except (Exception, SystemExit):
+            return  # data not fully resolvable - _save_to()'s validate_stackup() already
+                     # guarantees zero errors before calling this, so this is cheap insurance
+                     # only, same as _refresh_preview()'s equivalent guard
+
+        missing = dielectrics_list.find_missing_chiplet_boundaries()
+        if not missing:
+            return
+
+        missing_names = {d.name for d in missing}
+        names = ", ".join(sorted(missing_names))
+        reply = QMessageBox.question(
+            self, "Add a shared chiplet boundary Variable?",
+            "This stackup branches into multiple chiplets, but these Dielectrics have no "
+            f"Boundary= layer number:\n\n{names}\n\n"
+            "An explicit Boundary= is needed on both the shared base and each chiplet's own "
+            "root Dielectric to compute the correct bounding box once a stackup branches "
+            "like this. Add one shared Variable now and reference it as Boundary= on all of "
+            "them? You'll still need to set its actual GDS layer number on the Variables tab "
+            "afterward - this is asked only once per file.",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        var_name = _unique_name(self._variable_names(), "chiplet_boundary_layer")
+        stackup_writer.add_variable(root, Name=var_name, Value="0")
+        for element in self._dielectrics_container(root):
+            if element.get("Name") in missing_names:
+                element.set("Boundary", f"={var_name}")
+        self.variables_editor.reload()
+        self.dielectrics_editor.reload()
+
     def _save_to(self, filename):
         root = self.tree.getroot()
         errors = stackup_writer.validate_stackup(root)
@@ -2330,6 +2387,7 @@ class StackupEditorWindow(QDialog):
             return False
 
         self._maybe_offer_explicit_dielectric_references(root)
+        self._maybe_offer_chiplet_boundary_variable(root)
 
         app_name = getattr(self.MainWindow, "APP_NAME", "openEMS Stackup Editor")
         stackup_writer.stamp_header_comments(root, app_name, self.description_edit.toPlainText())
@@ -3062,7 +3120,7 @@ class StackupEditorWindow(QDialog):
             return []
         self.vector_widget.refresh(materials_list, dielectrics_list, metals_list)
         self.chiplet_switcher.set_groups(dielectrics_list.chiplet_groups)
-        return dielectrics_list.find_z_overlaps()
+        return dielectrics_list.find_z_overlaps() + dielectrics_list.find_missing_chiplet_boundary_warnings()
 
     def _on_preview_element_selected(self, kind, name):
         """Preview -> table: a shape was clicked in the cross-section preview -
