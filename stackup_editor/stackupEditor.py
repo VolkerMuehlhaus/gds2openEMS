@@ -1122,6 +1122,10 @@ class StackupEditorWindow(QDialog):
         self._was_valid = True
         self._invalid_field = None
 
+        # full text behind the status line's "Details..." button - see
+        # _refresh_validation_status()/_show_status_details()
+        self._status_details_text = ""
+
         # asked once per loaded/new file (reset in new_file()/_load_file()): whether to
         # write auto-assigned implicit-Dielectric-stacking References into the XML at
         # Save time (see _maybe_offer_explicit_dielectric_references())
@@ -1447,8 +1451,18 @@ class StackupEditorWindow(QDialog):
         outer_layout.addWidget(self.tabs)
 
         # ---------- status ----------
+        status_row = QHBoxLayout()
         self.status_label = QLabel("")
-        outer_layout.addWidget(self.status_label)
+        status_row.addWidget(self.status_label)
+        # only ever shown for the "N note(s)" case - errors already point at Save's own
+        # dialog ("see Save for details"), which shows the full error list on click
+        self.status_details_btn = QPushButton("Details...")
+        self.status_details_btn.setFlat(True)
+        self.status_details_btn.setVisible(False)
+        self.status_details_btn.clicked.connect(self._show_status_details)
+        status_row.addWidget(self.status_details_btn)
+        status_row.addStretch()
+        outer_layout.addLayout(status_row)
 
         self.setLayout(outer_layout)
 
@@ -3156,15 +3170,25 @@ class StackupEditorWindow(QDialog):
 
     def _refresh_validation_status(self, errors, warnings=None):
         warnings = warnings or []
+        self.status_details_btn.setVisible(bool(warnings) and not errors)
         if errors:
             self.status_label.setText(f"{len(errors)} problem(s) - see Save for details.")
             self.status_label.setStyleSheet("color: darkred;")
         elif warnings:
-            self.status_label.setText(f"Valid - {len(warnings)} note(s): " + "; ".join(warnings))
+            # short line only - the full text used to be inlined here, which could grow
+            # to an unreasonable single-line length (every warning joined with "; ") and
+            # forced the whole window wider to fit it. Full text now lives behind the
+            # "Details..." button instead, mirroring how the errors case above already
+            # points at Save's own dialog rather than inlining every error.
+            self.status_label.setText(f"Valid - {len(warnings)} note(s).")
             self.status_label.setStyleSheet("color: #b8860b;")
+            self._status_details_text = "\n".join(f"- {w}" for w in warnings)
         else:
             self.status_label.setText("Valid.")
             self.status_label.setStyleSheet("color: green;")
+
+    def _show_status_details(self):
+        QMessageBox.information(self, "Validation notes", self._status_details_text)
 
     def _on_tab_changed(self, index):
         if self.tabs.widget(index) is self.xml_preview_tab:
