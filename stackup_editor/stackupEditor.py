@@ -1061,12 +1061,17 @@ class StackupPreviewWindow(QWidget):
         super().__init__(parent, Qt.Window)
         self.setWindowTitle("Stackup Preview")
         self.resize(700, 900)
+        self.vector_widget = vector_widget
+        self.chiplet_switcher = chiplet_switcher
 
         # vector_widget is a QGraphicsView, already self-scrolling - no QScrollArea
         # wrapper needed (or wanted: it would nest a second set of scrollbars).
+        # "Topology Overview" lives inside chiplet_switcher's own combo (its first entry),
+        # not as a separate control here - see ChipletSwitcher.
         layout = QVBoxLayout()
         if chiplet_switcher is not None:
             layout.addWidget(chiplet_switcher)
+
         layout.addWidget(vector_widget)
         self.setLayout(layout)
 
@@ -1454,7 +1459,8 @@ class StackupEditorWindow(QDialog):
             via_label_suffix_fn=self.MainWindow.stackup_via_label_suffix,
         )
         self.vector_widget.setMinimumSize(600, 800)
-        self.chiplet_switcher = ChipletSwitcher(self.vector_widget.set_active_chiplet)
+        self.chiplet_switcher = ChipletSwitcher(self.vector_widget.set_active_chiplet,
+                                                 self.vector_widget.set_topology_mode)
         self.vector_widget.set_chiplet_switcher(self.chiplet_switcher)
 
         # two-way sync between the preview graphics and the Dielectric Stack/Layers
@@ -2988,7 +2994,7 @@ class StackupEditorWindow(QDialog):
             # and recreate out from under the signal that's still emitting it.
             QTimer.singleShot(0, self._reload_all_editors)
 
-        self._refresh_preview(root, errors)
+        warnings = warnings + self._refresh_preview(root, errors)
         self._refresh_validation_status(errors, warnings)
 
     # ---------- undo (bounded multi-level) ----------
@@ -3034,10 +3040,14 @@ class StackupEditorWindow(QDialog):
         self._refresh_xml_preview_if_active()
 
     def _refresh_preview(self, root, errors):
+        """Returns any dielectric-z-overlap warnings found (see
+        dielectric_layers_list.find_z_overlaps()), for the caller to merge into its own
+        warnings list - empty whenever the preview itself couldn't be refreshed.
+        """
         if errors:
             # data is not fully consistent yet (e.g. mid-edit) - leave the last
             # good preview showing rather than risk parse_substrate() choking on it
-            return
+            return []
         try:
             materials_list, dielectrics_list, metals_list = stackup_reader.parse_substrate(root)
         except (Exception, SystemExit):
@@ -3049,9 +3059,10 @@ class StackupEditorWindow(QDialog):
             # get here, but this is cheap insurance against ending the whole
             # process over a gap in that mirroring rather than just skipping a
             # preview refresh.
-            return
+            return []
         self.vector_widget.refresh(materials_list, dielectrics_list, metals_list)
         self.chiplet_switcher.set_groups(dielectrics_list.chiplet_groups)
+        return dielectrics_list.find_z_overlaps()
 
     def _on_preview_element_selected(self, kind, name):
         """Preview -> table: a shape was clicked in the cross-section preview -

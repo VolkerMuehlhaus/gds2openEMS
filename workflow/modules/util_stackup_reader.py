@@ -57,7 +57,7 @@
 #              addGeometry_to_CSX() in util_simulation_setup.py for where the reserved name is
 #              resolved into a literal ideal-conductor CSX.AddMetal(...) construct
 
-__version__ = "1.9.1"
+__version__ = "1.9.3"
 
 import os
 import math
@@ -920,12 +920,32 @@ class dielectric_layers_list:
        boundary coincidences, never a metal that's genuinely, non-trivially inside a
        dielectric.
 
-       groups (chiplet_groups, optional): if given, a metal is only registered into a
-       dielectric when they're in the same "scope" (both interposer, or both the same
-       chiplet) - see _same_chiplet_scope(). Without this, a chiplet stackup's metal could
-       get mis-registered into a different chiplet's dielectric purely because their z-ranges
-       happen to coincide (both chiplets typically start from the same interposer base).
-       None (the default) preserves the original unscoped behavior exactly.
+       Matching is tried in three tiers per metal, falling through only when a tier finds
+       nothing:
+         1. a dielectric in the metal's own scope (same chiplet, or both interposer) whose
+            range genuinely contains it (the exclusive-zmax test above).
+         2. failing that, a dielectric in the metal's own scope whose zmax exactly coincides
+            with the metal's zmin (within _BOUNDARY_EPSILON) - the ordinary
+            Reference="..." ReferenceEdge="Top" Zmin="0" pattern places a metal exactly on
+            top of its reference dielectric, which tier 1 deliberately excludes (see above);
+            without this tier, such a metal has nothing in its own scope to register into and
+            falls through to tier 3, where a *broader* dielectric that also happens to span
+            that z (typically a shared interposer AIR region sitting above every chiplet)
+            claims it instead - harmless in a single-chiplet file (there's only one such
+            dielectric, and it's the visually correct place to draw the metal), but wrong in
+            a multi-chiplet one: a shared/interposer dielectric is drawn in every chiplet's
+            view, so a metal that chiplet-scoping otherwise correctly attributes to one
+            chiplet would visibly appear in every sibling chiplet's view too.
+         3. the original, unscoped fallback: any dielectric whose scope is merely *compatible*
+            (see _same_chiplet_scope()) and whose range contains the metal. This is also the
+            only tier reachable at all when groups=None, since every dielectric/metal then
+            maps to the same (None) group - tiers 1-2 already cover that case exactly as
+            before with no behavior change.
+
+       groups (chiplet_groups, optional): if given, tiers 1-2 prefer keeping a metal inside
+       its own chiplet's dielectrics before falling back to a merely scope-compatible one -
+       see _same_chiplet_scope(). None (the default) preserves the original unscoped behavior
+       exactly (tier 1 alone covers every dielectric, same as before).
     Args:
         metals_list (metal_layers_list): metals read from stackup
         groups (chiplet_groups, optional): chiplet grouping from detect_chiplet_groups()
@@ -933,15 +953,72 @@ class dielectric_layers_list:
     _BOUNDARY_EPSILON = 1e-6
     dielectric_group_id = _group_id_map(groups, "dielectrics") if groups is not None else {}
     metal_group_id = _group_id_map(groups, "layers") if groups is not None else {}
+
     for dielectric in self.dielectrics:
-      enclosed = []
-      dgroup = dielectric_group_id.get(dielectric)
-      for metal in metals_list.metals:
-        if not _same_chiplet_scope(dgroup, metal_group_id.get(metal)):
+      dielectric.metals_inside = []
+
+    for metal in metals_list.metals:
+      mgroup = metal_group_id.get(metal)
+
+      own_containing = [d for d in self.dielectrics
+                         if dielectric_group_id.get(d) == mgroup
+                         and metal.zmin >= d.zmin - _BOUNDARY_EPSILON
+                         and metal.zmin < d.zmax - _BOUNDARY_EPSILON]
+      if own_containing:
+        candidates = own_containing
+      else:
+        own_boundary = [d for d in self.dielectrics
+                         if dielectric_group_id.get(d) == mgroup
+                         and abs(metal.zmin - d.zmax) < _BOUNDARY_EPSILON]
+        if own_boundary:
+          candidates = own_boundary
+        else:
+          candidates = [d for d in self.dielectrics
+                        if _same_chiplet_scope(dielectric_group_id.get(d), mgroup)
+                        and metal.zmin >= d.zmin - _BOUNDARY_EPSILON
+                        and metal.zmin < d.zmax - _BOUNDARY_EPSILON]
+
+      for dielectric in candidates:
+        dielectric.metals_inside.append(metal)
+
+
+  _Z_OVERLAP_EPSILON = 1e-6  # same magnitude/reasoning as register_metals_inside()'s _BOUNDARY_EPSILON
+
+  def find_z_overlap_pairs (self):
+    """Returns (dielectric_a, dielectric_b) pairs, both in the exact same scope (both
+       interposer, or both the identical chiplet), whose resolved z-ranges genuinely
+       overlap. Deliberately uses exact scope equality here, not _same_chiplet_scope()'s
+       "compatible" notion: an interposer dielectric (e.g. a filler/AIR region spanning the
+       whole domain) is *expected* to overlap every chiplet's own dielectrics - that's the
+       normal, intentional relationship between the shared base and each chiplet's carve-out,
+       not an error - so interposer-vs-chiplet pairs must be excluded here just as much as
+       chiplet-vs-different-chiplet pairs. Only two dielectrics that are both meant to
+       describe the *same* single column (both interposer, or both the same chiplet's own
+       subtree) can never legitimately overlap. Call only after chiplet_groups has been set
+       (i.e. after detect_chiplet_groups() has run). Backs both find_z_overlaps() (text
+       warnings) and the Stackup Preview's per-slab overlap outline
+       (compute_stackup_layout()/InteractiveRegionItem in editor_common.py).
+    """
+    group_id = _group_id_map(self.chiplet_groups, "dielectrics") if self.chiplet_groups is not None else {}
+    pairs = []
+    for i, a in enumerate(self.dielectrics):
+      for b in self.dielectrics[i + 1:]:
+        if group_id.get(a) != group_id.get(b):
           continue
-        if (metal.zmin >= dielectric.zmin - _BOUNDARY_EPSILON) and (metal.zmin < dielectric.zmax - _BOUNDARY_EPSILON):
-          enclosed.append(metal)
-      dielectric.metals_inside = enclosed
+        overlap = min(a.zmax, b.zmax) - max(a.zmin, b.zmin)
+        if overlap > self._Z_OVERLAP_EPSILON:
+          pairs.append((a, b))
+    return pairs
+
+
+  def find_z_overlaps (self):
+    """Human-readable warning strings, one per pair from find_z_overlap_pairs().
+    Returns:
+        list of str: one warning per overlapping dielectric pair, empty if none
+    """
+    return [f"Dielectric '{a.name}' (z={a.zmin:.4f}..{a.zmax:.4f}) overlaps "
+            f"'{b.name}' (z={b.zmin:.4f}..{b.zmax:.4f})"
+            for a, b in self.find_z_overlap_pairs()]
 
 
   def detect_chiplet_groups (self, metals_list):

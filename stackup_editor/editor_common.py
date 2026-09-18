@@ -44,12 +44,13 @@ using the nearest two points beyond either end) without adding a new dependency.
 """
 
 import numpy as np
+import shiboken6
 from PySide6.QtWidgets import (
     QWidget, QFrame, QGraphicsView, QGraphicsScene, QGraphicsItem, QGraphicsRectItem,
     QToolTip, QHBoxLayout, QLabel, QComboBox,
 )
-from PySide6.QtGui import QColor, QPainter, QPen
-from PySide6.QtCore import Qt, QRect, QRectF, Signal
+from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QPolygonF
+from PySide6.QtCore import Qt, QRect, QRectF, QPointF, QTimer, Signal
 
 from gds2openEMS import stackup_reader
 
@@ -154,8 +155,8 @@ class _LinearInterpExtrapolate:
 
 # ---------- POP UP WINDOW TO SHOW STACKUP ------------------
 
-def _build_dielectric_tooltip(dielectric):
-    return (
+def _build_dielectric_tooltip(dielectric, overlap_partner_names=None):
+    tooltip = (
         f"{dielectric.name}\n"
         f"Type: Dielectric\n"
         f"Material: {dielectric.material}\n"
@@ -163,6 +164,12 @@ def _build_dielectric_tooltip(dielectric):
         f"Zmax: {dielectric.zmax:.4f} µm\n"
         f"Thickness: {dielectric.thickness:.4f} µm"
     )
+    if overlap_partner_names:
+        # see dielectric_layers_list.find_z_overlap_pairs() / InteractiveRegionItem's
+        # always-on red dashed outline - names exactly what this slab conflicts with,
+        # so clicking the highlighted shape immediately explains why it's highlighted
+        tooltip += "\n⚠ Overlaps: " + ", ".join(overlap_partner_names)
+    return tooltip
 
 
 def _build_layer_tooltip(metal):
@@ -238,6 +245,18 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
         if dielectric_or_metal in active_chiplet.dielectrics or dielectric_or_metal in active_chiplet.layers:
             return active_chiplet.id
         return None
+
+    # dielectrics involved in an unexpected same-scope z-overlap (see
+    # dielectric_layers_list.find_z_overlap_pairs()) - drawn with a red dashed outline
+    # (InteractiveRegionItem._OVERLAP_PEN) regardless of the current chiplet selection, so
+    # the problem is visible without having to switch to whichever chiplet happens to be
+    # involved. Keyed by name (not object identity) to match dielectric_or_metal.name
+    # elsewhere in this function; overlap_partners_by_name additionally names *which*
+    # dielectric(s) it conflicts with, for the tooltip.
+    overlap_partners_by_name = {}
+    for a, b in dielectrics_list.find_z_overlap_pairs():
+        overlap_partners_by_name.setdefault(a.name, []).append(b.name)
+        overlap_partners_by_name.setdefault(b.name, []).append(a.name)
 
     # utility: flip y to have y=0 at bottom
     def flipy(y):
@@ -393,8 +412,9 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
             "key": dielectric.name,
             "rect": QRectF(xmin, flipy(y), w, -h).normalized(),
             "ref": dielectric,
-            "tooltip": _build_dielectric_tooltip(dielectric),
+            "tooltip": _build_dielectric_tooltip(dielectric, overlap_partners_by_name.get(dielectric.name)),
             "chiplet_id": entry_chiplet_id(dielectric),
+            "has_overlap": dielectric.name in overlap_partners_by_name,
         })
         drawText_left(xmin + 5, flipy(y), w, h, dielectric.name)
         drawText_right(xmin, flipy(y), w - 5, h, material_string)
@@ -666,6 +686,190 @@ def compute_stackup_layout(materials_list, dielectrics_list, metals_list, width,
     return draw_calls, interactive_entries
 
 
+def compute_topology_overview_layout(dielectrics_list, materials_list, width, height,
+                                      dielectric_color_fn, dielectric_label_fn):
+    """Pure layout computation for the "topology overview" sketch: the shared/interposer
+    dielectrics drawn as one full-width slab stack, with each detected chiplet's own
+    dielectrics drawn as an equal-width column placed side by side on top of it - a
+    NOT-to-GDS-scale sketch of "small chiplets sitting side by side on a shared dielectric
+    base". Deliberately limited to dielectric blocks only (no metal/via boxes, no
+    z-interpolation) - see compute_stackup_layout() for that fuller, more fragile rendering
+    this is a simplified sibling of, not a variant of.
+
+    Only meaningful for a stackup with 2+ detected chiplets (dielectrics_list.chiplet_groups.
+    chiplets) - returns ([], []) otherwise, so a caller that forgets to gate on chiplet count
+    gets an empty scene rather than a crash. Real gating is in the UI (see VectorWidget.
+    set_topology_mode() / StackupPreviewWindow's topology toggle, which only becomes visible
+    at the same 2+ chiplets threshold ChipletSwitcher already uses).
+
+    Returns (draw_calls, interactive_entries) - same contract as compute_stackup_layout()/
+    render_stackup_layout(), so this is a drop-in alternative source of draw_calls for
+    StackupBackgroundItem, and interactive_entries follow the same {"kind": "dielectric",
+    "key", "rect", "ref", "tooltip", "chiplet_id"} shape (kind is always "dielectric" here -
+    there is no "layer" kind in this mode) so InteractiveRegionItem/VectorWidget's existing
+    click/hover/selection machinery works unchanged.
+    """
+    chiplet_groups = getattr(dielectrics_list, "chiplet_groups", None)
+    if chiplet_groups is None or len(chiplet_groups.chiplets) < 2:
+        return [], []
+
+    draw_calls = []
+    interactive_entries = []
+
+    # same draw-call-recorder-closure pattern as compute_stackup_layout() (setPen/setBrush/
+    # drawRect/drawLine/flipy), duplicated locally rather than factored into a shared helper -
+    # keeps compute_stackup_layout() completely untouched, zero regression risk there
+    def flipy(y):
+        return height - y
+
+    def setPen(pen):
+        draw_calls.append(("setPen", (pen,)))
+
+    def setBrush(brush):
+        draw_calls.append(("setBrush", (brush,)))
+
+    def drawRect(x, y, w, h):
+        draw_calls.append(("drawRect", (x, y, w, h)))
+
+    def drawLine(x1, y1, x2, y2):
+        draw_calls.append(("drawLine", (x1, y1, x2, y2)))
+
+    def drawText_center(x, y, w, h, text):
+        rect = QRect(int(x), int(y - h), int(w), int(h))
+        draw_calls.append(("drawText", (rect, Qt.AlignVCenter | Qt.AlignHCenter, text)))
+
+    penBlack = QPen(Qt.black, 1)
+    penDivider = QPen(QColor(134, 132, 130), 1, Qt.DashLine)
+
+    def dielectric_color(dielectric):
+        material = materials_list.get_by_name(dielectric.material)
+        return dielectric_color_fn(material) if material is not None else INVALID_MATERIAL_COLOR
+
+    # purely cosmetic pseudo-3D extrusion: a right-side face (darker shade) on every slab,
+    # and a top face (lighter shade) only on the topmost slab of each "tower" (an
+    # interposer stack or one chiplet column) - a top face on every slab would just get
+    # overdrawn by the slab stacked directly above it, since there's no gap there to show
+    # it in; the right-side face has no such conflict since nothing else is drawn to the
+    # right of a slab within its own tower. DEPTH is in pixels, not model units - purely a
+    # fixed visual bevel size regardless of zoom/window size.
+    DEPTH = 6
+
+    def draw_side_face(x, y, w, h, color):
+        top, bottom = (y, y + h) if h >= 0 else (y + h, y)
+        right = x + w
+        face = QPolygonF([
+            QPointF(right, top), QPointF(right, bottom),
+            QPointF(right + DEPTH, bottom - DEPTH), QPointF(right + DEPTH, top - DEPTH),
+        ])
+        setPen(penBlack)
+        setBrush(QBrush(color.darker(130)))
+        draw_calls.append(("drawPolygon", (face,)))
+
+    def draw_top_face(x, y, w, h, color):
+        top = y if h >= 0 else y + h
+        face = QPolygonF([
+            QPointF(x, top), QPointF(x + w, top),
+            QPointF(x + w + DEPTH, top - DEPTH), QPointF(x + DEPTH, top - DEPTH),
+        ])
+        setPen(penBlack)
+        setBrush(QBrush(color.lighter(130)))
+        draw_calls.append(("drawPolygon", (face,)))
+
+    interposer = sorted(chiplet_groups.interposer_dielectrics, key=lambda d: d.zmin)
+    chiplets = chiplet_groups.chiplets
+
+    xmin = width * 0.02
+    xmax = width * 0.98 - DEPTH  # leave room for the side-face extrusion on the right edge
+    w_total = xmax - xmin
+    n_chiplets = len(chiplets)
+    gutter = width * 0.035  # a bit more breathing room between chiplets on the carrier
+    col_w = (w_total - gutter * (n_chiplets - 1)) / n_chiplets
+
+    # HEADER_HEIGHT is reserved *above* ymax for the chiplet column header labels (drawn
+    # below), not squeezed into the top margin - the header band needs real budget of its
+    # own, or it clips against the scene's own top edge (y=0) at typical preview window
+    # heights, since the margin alone is only ~2.5% of height. DEPTH is reserved on top of
+    # that so each column's top-face extrusion has room too, above the columns but below
+    # the header text (see the header draw call below, shifted up by DEPTH to clear it).
+    HEADER_HEIGHT = 20
+    ymin = height * 0.025
+    ymax = height * 0.975 - HEADER_HEIGHT - DEPTH
+
+    # schematic sizing: unlike compute_stackup_layout()'s "1 part per metal level" rule
+    # (parts = max(1, metals_count)), no metals are drawn here at all, so every dielectric
+    # simply gets 1 part
+    base_parts = max(1, len(interposer))
+    chiplet_parts = max(1, max(len(chiplet.dielectrics) for chiplet in chiplets))
+    total_parts = base_parts + chiplet_parts
+    part_height = (ymax - ymin) / total_parts
+    base_height = part_height * base_parts
+    # every chiplet's column gets the SAME total height (driven by whichever chiplet has the
+    # most dielectrics), so all columns reach the same top y and visually "sit side by side" -
+    # a chiplet with fewer dielectrics gets a few taller slabs instead of a shorter column
+    column_height = part_height * chiplet_parts
+
+    # draw interposer slabs bottom-up, full width - every slab gets a side-face extrusion,
+    # but only the topmost one also gets a top face (a lower slab's "top" is immediately
+    # covered by the slab stacked on it, so there's no gap there to show one in)
+    y = ymin
+    for i, dielectric in enumerate(interposer):
+        color = dielectric_color(dielectric)
+        draw_side_face(xmin, flipy(y), w_total, -part_height, color)
+        setPen(penBlack)
+        setBrush(color)
+        drawRect(xmin, flipy(y), w_total, -part_height)
+        if i == len(interposer) - 1:
+            draw_top_face(xmin, flipy(y), w_total, -part_height, color)
+        interactive_entries.append({
+            "kind": "dielectric",
+            "key": dielectric.name,
+            "rect": QRectF(xmin, flipy(y), w_total, -part_height).normalized(),
+            "ref": dielectric,
+            "tooltip": _build_dielectric_tooltip(dielectric),
+            "chiplet_id": None,
+        })
+        drawText_center(xmin + 5, flipy(y), w_total - 10, part_height, dielectric.name)
+        y += part_height
+
+    setPen(penDivider)
+    drawLine(xmin, flipy(y), xmax, flipy(y))
+
+    # draw each chiplet's column, side by side, starting where the interposer stack ends
+    for i, chiplet in enumerate(chiplets):
+        x = xmin + i * (col_w + gutter)
+        chip_dielectrics = sorted(chiplet.dielectrics, key=lambda d: d.zmin)
+        col_part_height = column_height / len(chip_dielectrics)
+
+        setPen(penBlack)
+        # shifted up by DEPTH so the topmost slab's top-face extrusion (drawn below)
+        # doesn't overlap the label text
+        drawText_center(x, flipy(y + column_height) - DEPTH, col_w, HEADER_HEIGHT, chiplet.id)
+
+        cy = y
+        for j, dielectric in enumerate(chip_dielectrics):
+            color = dielectric_color(dielectric)
+            draw_side_face(x, flipy(cy), col_w, -col_part_height, color)
+            setPen(penBlack)
+            setBrush(color)
+            drawRect(x, flipy(cy), col_w, -col_part_height)
+            if j == len(chip_dielectrics) - 1:
+                draw_top_face(x, flipy(cy), col_w, -col_part_height, color)
+            interactive_entries.append({
+                "kind": "dielectric",
+                "key": dielectric.name,
+                "rect": QRectF(x, flipy(cy), col_w, -col_part_height).normalized(),
+                "ref": dielectric,
+                "tooltip": _build_dielectric_tooltip(dielectric),
+                "chiplet_id": chiplet.id,
+            })
+            # narrow columns have no room for the wide slab's left-name/right-material
+            # two-sided label - centered name only, material stays available via tooltip
+            drawText_center(x + 2, flipy(cy), col_w - 4, col_part_height, dielectric.name)
+            cy += col_part_height
+
+    return draw_calls, interactive_entries
+
+
 def render_stackup_layout(draw_calls, painter, width, height):
     """Replays draw_calls (from compute_stackup_layout()) onto painter - the exact
     same QPainter calls the previous paintEvent()-based VectorWidget made directly."""
@@ -708,8 +912,15 @@ class InteractiveRegionItem(QGraphicsRectItem):
     """
 
     _HIGHLIGHT_PEN = QPen(QColor(255, 140, 0), 3)
+    # a dielectric whose resolved z-range overlaps another same-scope dielectric (see
+    # dielectric_layers_list.find_z_overlap_pairs()) - distinct red/dashed vs. the orange/
+    # solid selection highlight so both are visually distinguishable if a slab is both
+    # selected and overlapping at once. Always drawn (not just on hover/click), unlike the
+    # selection highlight - this needs to be visible without the user doing anything, since
+    # it's the primary, contextual signal for what would otherwise only be a status-bar line
+    _OVERLAP_PEN = QPen(QColor(220, 0, 0), 2, Qt.DashLine)
 
-    def __init__(self, rect, kind, key, ref, tooltip, chiplet_id=None):
+    def __init__(self, rect, kind, key, ref, tooltip, chiplet_id=None, has_overlap=False):
         super().__init__(rect)
         self.setPen(Qt.NoPen)
         self.setBrush(Qt.NoBrush)
@@ -722,11 +933,17 @@ class InteractiveRegionItem(QGraphicsRectItem):
         # _item_lookup compound key (see _rebuild_scene()), not part of the external
         # elementSelected/select_element(kind, name) contract, which stays plain-name
         self.chiplet_id = chiplet_id
+        self.has_overlap = has_overlap
 
     def paint(self, painter, option, widget=None):
-        # unselected: draw nothing, StackupBackgroundItem already drew the real
-        # colors/labels underneath. Selected: a highlight outline instead of Qt's
-        # default dashed selection rectangle, which would look wrong here.
+        # unselected/non-overlapping: draw nothing, StackupBackgroundItem already drew the
+        # real colors/labels underneath.
+        if self.has_overlap:
+            painter.setPen(self._OVERLAP_PEN)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self.rect())
+        # Selected: a highlight outline instead of Qt's default dashed selection rectangle,
+        # which would look wrong here - drawn last/on top so it stays visually dominant.
         if self.isSelected():
             painter.setPen(self._HIGHLIGHT_PEN)
             painter.setBrush(Qt.NoBrush)
@@ -784,6 +1001,16 @@ class VectorWidget(QGraphicsView):
         # compute_stackup_layout() pick the first one", not "no chiplets"; irrelevant
         # (ignored) for an ordinary, non-chiplet stackup
         self._active_chiplet_id = None
+        # True shows the simplified "topology overview" sketch (compute_topology_overview_
+        # layout()) instead of the normal detailed cross-section (compute_stackup_layout())
+        # - see set_topology_mode()
+        self._topology_mode = False
+        # True only while _rebuild_scene() is restoring a previous selection
+        # programmatically (see below) - distinguishes that from a genuine user click, so
+        # _on_scene_selection_changed()'s "clicking a chiplet in topology mode switches to
+        # it" behavior doesn't misfire just because a chiplet-owned item happened to carry
+        # its selection over into a freshly-entered topology view
+        self._restoring_selection = False
         # set via set_chiplet_switcher() by whoever constructs this widget, once its
         # own ChipletSwitcher exists too - lets Left/Right (see keyPressEvent below)
         # drive the same single source of truth (the switcher's combo index) as
@@ -824,8 +1051,19 @@ class VectorWidget(QGraphicsView):
         """
         self._chiplet_switcher = chiplet_switcher
 
+    def set_topology_mode(self, enabled):
+        """Switches between the normal cross-section preview and the "topology overview"
+        sketch (see compute_topology_overview_layout()) and rebuilds the scene - called by
+        ChipletSwitcher when its "Topology Overview" entry (always item 0) is selected/
+        deselected.
+        """
+        self._topology_mode = bool(enabled)
+        self._rebuild_scene()
+
     def keyPressEvent(self, event):
         if self._chiplet_switcher is not None and event.key() in (Qt.Key_Left, Qt.Key_Right):
+            # steps through the switcher's combo - "Topology Overview" plus every real
+            # chiplet, in that order - as one unified list
             self._chiplet_switcher.step(-1 if event.key() == Qt.Key_Left else 1)
             event.accept()
             return
@@ -858,18 +1096,24 @@ class VectorWidget(QGraphicsView):
         self._item_lookup = {}
         self._item_by_kind_name = {}
 
-        draw_calls, interactive_entries = compute_stackup_layout(
-            self.materials_list, self.dielectrics_list, self.metals_list,
-            width, height,
-            self.dielectric_color_fn, self.dielectric_label_fn,
-            self.metal_label_fn, self.via_label_suffix_fn,
-            active_chiplet_id=self._active_chiplet_id)
+        if self._topology_mode:
+            draw_calls, interactive_entries = compute_topology_overview_layout(
+                self.dielectrics_list, self.materials_list, width, height,
+                self.dielectric_color_fn, self.dielectric_label_fn)
+        else:
+            draw_calls, interactive_entries = compute_stackup_layout(
+                self.materials_list, self.dielectrics_list, self.metals_list,
+                width, height,
+                self.dielectric_color_fn, self.dielectric_label_fn,
+                self.metal_label_fn, self.via_label_suffix_fn,
+                active_chiplet_id=self._active_chiplet_id)
 
         scene.addItem(StackupBackgroundItem(draw_calls, width, height))
 
         for entry in interactive_entries:
             item = InteractiveRegionItem(entry["rect"], entry["kind"], entry["key"],
-                                          entry["ref"], entry["tooltip"], entry["chiplet_id"])
+                                          entry["ref"], entry["tooltip"], entry["chiplet_id"],
+                                          has_overlap=entry.get("has_overlap", False))
             scene.addItem(item)
             self._item_lookup[(entry["kind"], entry["chiplet_id"], entry["key"])] = item
             self._item_by_kind_name[(entry["kind"], entry["key"])] = item
@@ -877,7 +1121,11 @@ class VectorWidget(QGraphicsView):
         scene.setSceneRect(0, 0, width, height)
 
         if previously_selected is not None and previously_selected in self._item_lookup:
-            self._item_lookup[previously_selected].setSelected(True)
+            self._restoring_selection = True
+            try:
+                self._item_lookup[previously_selected].setSelected(True)
+            finally:
+                self._restoring_selection = False
 
     def _selected_key(self):
         for triple, item in self._item_lookup.items():
@@ -893,21 +1141,96 @@ class VectorWidget(QGraphicsView):
             QToolTip.hideText()
             return
         item = selected[0]
-        self.elementSelected.emit(item.kind, item.key)
+        kind, key, chiplet_id = item.kind, item.key, item.chiplet_id
+        if self._restoring_selection:
+            # _rebuild_scene() is merely restoring whatever was already selected before
+            # the rebuild - not a fresh user click - so this must not re-fire
+            # elementSelected: a listener like StackupEditorWindow._on_preview_element_
+            # selected() switches the editor's active tab to Dielectrics/Layers on every
+            # emission, which would otherwise happen after *any* unrelated edit anywhere
+            # in the editor (e.g. adding a Variable) as long as some shape was ever
+            # selected in the preview earlier - yanking the user back out of whichever
+            # tab they're actually working in. Nor does it qualify for the topology-mode
+            # click-switch behavior below, for the same reason.
+            return
+        if (self._topology_mode and chiplet_id is not None
+                and self._chiplet_switcher is not None):
+            # clicking a chiplet's own slab in the topology overview switches straight to
+            # that chiplet's detail view (dropdown included), instead of just selecting it
+            # in place (the _restoring_selection case above already excludes a
+            # programmatic selection-carryover from triggering this - e.g. a chiplet-owned
+            # item selected just before switching into topology mode, and also present
+            # there, would otherwise immediately bounce back out of the topology view the
+            # user just chose). Deferred via QTimer.singleShot(0, ...): this handler is running
+            # from inside the very item/scene the switch is about to tear down (switching
+            # mode rebuilds the scene), so acting immediately would touch already-deleted
+            # Qt objects once control returns to InteractiveRegionItem.mouseReleaseEvent()'s
+            # own remaining code. elementSelected still ends up emitted for cross-window
+            # sync once the deferred re-select below runs, via the normal (non-topology)
+            # path this same handler takes for that new selection.
+            QTimer.singleShot(0, self._deferred_switch_to_chiplet(chiplet_id, kind, key))
+            return
+        self.elementSelected.emit(kind, key)
+
+    def _deferred_switch_to_chiplet(self, chiplet_id, kind, key):
+        """Returns a zero-arg callable for QTimer.singleShot(0, ...) (see
+        _on_scene_selection_changed()): switches out of topology mode into chiplet_id's
+        detail view via the ChipletSwitcher (so its combo reflects the change too), then
+        re-selects the same (kind, key) element there, carrying the highlight across the
+        mode switch. No-ops safely if this widget was destroyed (window closed) before the
+        deferred call fires.
+        """
+        def run():
+            if not shiboken6.isValid(self):
+                return
+            self._chiplet_switcher.set_current_chiplet(chiplet_id)
+            self.select_element(kind, key)
+        return run
 
     def select_element(self, kind, name):
         """Selects/highlights the shape for (kind, name) - kind is "dielectric" or
         "layer". Called by the editor when a table row is selected, to keep the
-        preview in sync with the table. A no-op if that shape is already the sole
-        selection, so this doesn't bounce back into elementSelected/the editor's own
-        selection-changed handling.
+        preview in sync with the table (also reached from a cross-window click in the
+        Layout Preview - see _forward_stackup_selection_to_layout_preview()'s reverse
+        direction). A no-op if that shape is already the sole selection, so this
+        doesn't bounce back into elementSelected/the editor's own selection-changed
+        handling.
+
+        The Dielectrics/Layers tables list every element in the file regardless of
+        chiplet, so (kind, name) may refer to an element that belongs to a chiplet
+        other than the one currently shown - in that case, switch to the chiplet that
+        actually contains it first (via the attached ChipletSwitcher, so its combo box
+        stays the single source of truth - see ChipletSwitcher.set_current_chiplet()),
+        then select it there.
         """
         item = self._item_by_kind_name.get((kind, name))
+        if item is None:
+            owning_chiplet_id = self._find_owning_chiplet_id(kind, name)
+            if owning_chiplet_id is not None and owning_chiplet_id != self._active_chiplet_id:
+                if self._chiplet_switcher is not None:
+                    self._chiplet_switcher.set_current_chiplet(owning_chiplet_id)
+                else:
+                    self.set_active_chiplet(owning_chiplet_id)
+                item = self._item_by_kind_name.get((kind, name))
         if self.scene().selectedItems() == ([item] if item is not None else []):
             return
         self.scene().clearSelection()
         if item is not None:
             item.setSelected(True)
+
+    def _find_owning_chiplet_id(self, kind, name):
+        """Which chiplet's subtree (kind, name) belongs to, or None if it's an
+        interposer element (always shown, no switch needed) or doesn't exist at all -
+        used by select_element() to jump to the right chiplet before selecting.
+        """
+        chiplet_groups = getattr(self.dielectrics_list, "chiplet_groups", None)
+        if chiplet_groups is None:
+            return None
+        attr = "dielectrics" if kind == "dielectric" else "layers"
+        for chiplet in chiplet_groups.chiplets:
+            if any(element.name == name for element in getattr(chiplet, attr)):
+                return chiplet.id
+        return None
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -916,20 +1239,34 @@ class VectorWidget(QGraphicsView):
 
 class ChipletSwitcher(QWidget):
     """Combo box + "Chiplet N of M" label for picking which chiplet a Stackup Preview
-    shows, for a stackup where dielectric_layers_list.detect_chiplet_groups() found more
-    than one chiplet sharing a common interposer base (see util_stackup_reader.py). Hidden
-    entirely (never even shown) when there are 0 or 1 chiplet groups.
+    shows in detail, for a stackup where dielectric_layers_list.detect_chiplet_groups()
+    found more than one chiplet sharing a common interposer base (see
+    util_stackup_reader.py). "Topology Overview" (see compute_topology_overview_layout())
+    is listed as the combo's first entry, alongside the real chiplets, rather than as a
+    separate control - selecting it shows every chiplet at once instead of one in detail.
+    Hidden entirely (never even shown) when there are 0 or 1 chiplet groups, since neither
+    per-chiplet detail switching nor a topology overview is meaningful then.
     """
 
-    def __init__(self, on_chiplet_changed):
+    TOPOLOGY_LABEL = "Topology Overview"
+    # unique per-class sentinel (not a chiplet id, which is always a real dielectric name)
+    # marking "Topology Overview is/was the selection" - see set_groups()
+    _TOPOLOGY = object()
+
+    def __init__(self, on_chiplet_changed, on_topology_changed):
         """Args:
-            on_chiplet_changed (callable): called with a chiplet id (str) whenever the
-              combo box selection changes - wire this straight to a VectorWidget's
+            on_chiplet_changed (callable): called with a chiplet id (str) whenever a real
+              chiplet is selected - wire this straight to a VectorWidget's
               set_active_chiplet().
+            on_topology_changed (callable): called with True when "Topology Overview" is
+              selected, and False whenever switching away from it to a real chiplet - wire
+              this straight to a VectorWidget's set_topology_mode().
         """
         super().__init__()
         self._on_chiplet_changed = on_chiplet_changed
-        self._chiplet_ids = []
+        self._on_topology_changed = on_topology_changed
+        self._chiplet_ids = []  # real chiplet ids only - combo index 0 is always Topology
+                                 # Overview, so combo index i>=1 maps to _chiplet_ids[i-1]
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -946,20 +1283,47 @@ class ChipletSwitcher(QWidget):
         case this stays/becomes hidden and does nothing else).
 
         In the Stackup Editor this runs after every single edit (see _refresh_preview()),
-        not just an actual file (re)load - so it keeps showing whichever chiplet was
-        already active, by id, if that id still exists in the new grouping, rather than
-        always snapping back to the first one and disorienting the user mid-edit. Falls
-        back to the first chiplet only when there was no previous selection or it no
-        longer exists (e.g. that chiplet was just renamed or removed).
+        not just an actual file (re)load - so it keeps showing whichever selection was
+        already active - a chiplet by id, or Topology Overview - if it's still valid in the
+        new grouping, rather than always snapping back to the first chiplet and disorienting
+        the user mid-edit. A genuinely fresh start (no previous selection at all - opening/
+        creating a multi-chiplet file for the first time in this widget) instead leads with
+        Topology Overview, so the viewer sees the whole picture before drilling into any one
+        chiplet. Falls back to the first real chiplet (not Topology Overview) when the
+        previously-active chiplet no longer exists (e.g. renamed/removed), or when Topology
+        Overview was active but chiplets just dropped below 2 (no longer a meaningful choice
+        - matches Topology Overview effectively "closing" the same way this whole combo
+        already hides itself in that case).
         """
         chiplets = groups.chiplets if groups is not None else []
         new_ids = [chiplet.id for chiplet in chiplets]
 
-        previous_id = (self._chiplet_ids[self.combo.currentIndex()]
-                       if self._chiplet_ids and 0 <= self.combo.currentIndex() < len(self._chiplet_ids)
-                       else None)
+        old_index = self.combo.currentIndex()
+        if self._chiplet_ids and old_index == 0:
+            previous = self._TOPOLOGY
+        elif self._chiplet_ids and 1 <= old_index <= len(self._chiplet_ids):
+            previous = self._chiplet_ids[old_index - 1]
+        else:
+            previous = None
+
         self._chiplet_ids = new_ids
-        index = self._chiplet_ids.index(previous_id) if previous_id in self._chiplet_ids else 0
+
+        if previous is self._TOPOLOGY and len(self._chiplet_ids) >= 2:
+            index = 0
+        elif previous in self._chiplet_ids:
+            index = self._chiplet_ids.index(previous) + 1
+        elif previous is None and len(self._chiplet_ids) >= 2:
+            # a genuinely fresh start (no previous selection at all - e.g. this file was
+            # just opened/created) leads with Topology Overview, so the viewer sees the
+            # whole multi-chiplet picture before drilling into any one chiplet's detail.
+            # Deliberately distinct from the next branch below: a previous selection that
+            # existed but became invalid mid-edit (e.g. the active chiplet was just
+            # renamed/removed) still falls back to a real chiplet, not Topology Overview -
+            # jumping to a whole different view mode as a side effect of an unrelated edit
+            # would be more surprising than helpful there.
+            index = 0
+        else:
+            index = 1 if self._chiplet_ids else 0
 
         # setCurrentIndex() is also kept inside the signals-blocked region (not just
         # clear()/addItems()) - whether it actually changes anything is unpredictable
@@ -969,34 +1333,65 @@ class ChipletSwitcher(QWidget):
         # below every time this method runs are the one reliable path instead.
         self.combo.blockSignals(True)
         self.combo.clear()
-        self.combo.addItems(self._chiplet_ids)
         if self._chiplet_ids:
+            self.combo.addItem(self.TOPOLOGY_LABEL)
+            self.combo.addItems(self._chiplet_ids)
             self.combo.setCurrentIndex(index)
         self.combo.blockSignals(False)
 
         self.setVisible(len(chiplets) > 1)
         if chiplets:
             self._update_label(index, len(chiplets))
-            self._on_chiplet_changed(self._chiplet_ids[index])
+            self._fire(index)
+        elif previous is self._TOPOLOGY:
+            # no chiplets left at all (not just fewer than 2) - there's no real chiplet
+            # entry left to fire _fire() with, but we still owe VectorWidget an explicit
+            # exit from Topology Overview, or it would stay stuck showing a sketch for a
+            # chiplet grouping that no longer exists
+            self._on_topology_changed(False)
 
     def _on_index_changed(self, index):
-        if index < 0 or index >= len(self._chiplet_ids):
+        if index < 0 or index > len(self._chiplet_ids):
             return
         self._update_label(index, len(self._chiplet_ids))
-        self._on_chiplet_changed(self._chiplet_ids[index])
+        self._fire(index)
+
+    def _fire(self, index):
+        if index == 0:
+            self._on_topology_changed(True)
+        else:
+            self._on_topology_changed(False)
+            self._on_chiplet_changed(self._chiplet_ids[index - 1])
 
     def _update_label(self, index, total):
-        self.label.setText(f"Chiplet {index + 1} of {total}:")
+        if index == 0:
+            self.label.setText(f"{self.TOPOLOGY_LABEL} ({total} chiplets):")
+        else:
+            self.label.setText(f"Chiplet {index} of {total}:")
 
     def step(self, direction):
-        """Moves the combo box by one chiplet, wrapping around at either end - called by
-        VectorWidget.keyPressEvent() for Left(-1)/Right(+1). Goes through
-        setCurrentIndex() (not a direct call to the on_chiplet_changed callback), so this
-        stays the single source of truth: the combo's own display always matches what's
-        actually shown, however the switch was triggered. A no-op with 0-1 chiplets,
-        same as the combo being hidden then.
+        """Moves the combo box by one entry (Topology Overview counts as one), wrapping
+        around at either end - called by VectorWidget.keyPressEvent() for Left(-1)/
+        Right(+1). Goes through setCurrentIndex() (not a direct call to the on_*_changed
+        callbacks), so this stays the single source of truth: the combo's own display
+        always matches what's actually shown, however the switch was triggered. A no-op
+        with 0-1 chiplets, same as the combo being hidden then.
         """
         if len(self._chiplet_ids) < 2:
             return
-        new_index = (self.combo.currentIndex() + direction) % len(self._chiplet_ids)
+        total_items = len(self._chiplet_ids) + 1  # +1 for the Topology Overview entry
+        new_index = (self.combo.currentIndex() + direction) % total_items
         self.combo.setCurrentIndex(new_index)
+
+    def set_current_chiplet(self, chiplet_id):
+        """Programmatically switches to a specific real chiplet by id (never to Topology
+        Overview) - called by VectorWidget.select_element() when a selection made
+        elsewhere (a table row, or a cross-window click from the Layout Preview) refers to
+        an element that isn't part of the currently active chiplet, or is part of one while
+        Topology Overview is active. Goes through setCurrentIndex(), same
+        single-source-of-truth reasoning as step(). A no-op if chiplet_id isn't a currently
+        known chiplet.
+        """
+        if chiplet_id not in self._chiplet_ids:
+            return
+        self.combo.setCurrentIndex(self._chiplet_ids.index(chiplet_id) + 1)
