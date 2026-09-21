@@ -3,8 +3,6 @@
 The files provided here enable openEMS EM simulation with layouts
 created for the IHP SG13G2 RFIC technology.
 
-![Intro](./doc/png/gds2openEMS_banner.png)
-
 # What's New
 
 One major change is that documentation and examples now install gds2openEMS as a module from PyPi (pip install gds2openEMS), instead of the local copy of the modules folder used before. The old method with local copy still works, but the new method using Python module installation is more convenient.
