@@ -23,5 +23,5 @@ from . import util_utilities as utilities
 from . import util_simulation_setup as simulation_setup
 from . import util_meshlines as util_meshlines
 
-__version__ = "0.4.0"   # version of gds2openEMS
+__version__ = "0.4.1"   # version of gds2openEMS
 
