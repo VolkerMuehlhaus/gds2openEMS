@@ -227,7 +227,7 @@ To close the preview, just close that window. You can also press Ctrl-C to abort
 
 ### Re-running a model: the hash-based skip
 
-`runSimulation()` computes a content hash of the generated CSX model file. It compares that hash against the hash stored from the previous run in that model's output directory. If the hashes match, it skips the FDTD solve and prints:
+`runSimulation()` computes a content hash covering both the generated CSX model file and the calling model script (`.py`) itself, up to and including the line that calls `runSimulation()`. Code further down in that script (post-processing, plotting, ...) is not part of the hash. It compares that hash against the hash stored from the previous run in that model's output directory. If the hashes match, it skips the FDTD solve and prints:
 
 ```
 Data for this model already exists, skipping simulation!
@@ -263,7 +263,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 |---|---|
 | `settings['unit']` | Unit of geometry values, typically `1e-6` (microns) |
 | `settings['margin']` | Oversize of dielectrics from the GDSII bounding box, in the geometry unit |
-| `settings['fstart']` / `settings['fstop']` | Start/stop frequency in Hz for the S-parameter output (FFT post-processing — see [About this workflow](#about-this-workflow); has no effect on simulation time) |
+| `settings['fstart']` / `settings['fstop']` | Start/stop frequency in Hz for the S-parameter output (FFT post-processing — see [About this workflow](#about-this-workflow)|
 | `settings['numfreq']` | Number of frequency points in the output sweep |
 | `settings['refined_cellsize']` | Target mesh size at conductor edges |
 | `settings['Boundaries']` | Required, no built-in default. List of 6 boundary conditions, one per side (`xmin, xmax, ymin, ymax, zmin, zmax`): `'PEC'` (lossless metal box), `'PMC'` (magnetic wall, useful for symmetry), `'MUR'` (simple absorbing), or `'PML_8'` (higher-quality absorbing, much slower simulation) |

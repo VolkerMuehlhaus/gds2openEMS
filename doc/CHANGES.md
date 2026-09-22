@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 22-Sep-2026
+
+The [hash-based skip](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#re-running-a-model-the-hash-based-skip) in `runSimulation()` now also hashes the calling model script itself (up to and including the `runSimulation()` call), not just the generated CSX file. This catches changes to solver-runtime settings like `numThreads` or `EndCriteria` that never end up in the CSX file and were previously missed, causing stale results to be silently reused. Code after the call (post-processing, plotting, ...) is still excluded from the hash, so editing that still doesn't force a re-solve. Existing `simulation_model.hash` files from before this change will mismatch once, forcing one re-simulation per cached result.
+
 ## 12-Sep-2026
 
 Added two reserved stackup materials that need no `<Materials>` entry: `PEC` (ideal conductor, on conductor/via/sheet Layers, modeled with `CSX.AddMetal`) and `AIR` (built-in default dielectric, overridable). Also supported in the Stackup Editor (`stackup_editor/`).
