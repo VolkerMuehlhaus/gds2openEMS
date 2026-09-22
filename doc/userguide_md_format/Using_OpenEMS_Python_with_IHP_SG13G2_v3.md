@@ -227,7 +227,7 @@ To close the preview, just close that window. You can also press Ctrl-C to abort
 
 ### Re-running a model: the hash-based skip
 
-`runSimulation()` computes a content hash of the generated CSX model file. It compares that hash against the hash stored from the previous run in that model's output directory. If the hashes match, it skips the FDTD solve and prints:
+`runSimulation()` computes a content hash covering both the generated CSX model file and the calling model script (`.py`) itself, up to and including the line that calls `runSimulation()`. Code further down in that script (post-processing, plotting, ...) is not part of the hash. It compares that hash against the hash stored from the previous run in that model's output directory. If the hashes match, it skips the FDTD solve and prints:
 
 ```
 Data for this model already exists, skipping simulation!
@@ -263,7 +263,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 |---|---|
 | `settings['unit']` | Unit of geometry values, typically `1e-6` (microns) |
 | `settings['margin']` | Oversize of dielectrics from the GDSII bounding box, in the geometry unit |
-| `settings['fstart']` / `settings['fstop']` | Start/stop frequency in Hz for the S-parameter output (FFT post-processing — see [About this workflow](#about-this-workflow); has no effect on simulation time) |
+| `settings['fstart']` / `settings['fstop']` | Start/stop frequency in Hz for the S-parameter output (FFT post-processing — see [About this workflow](#about-this-workflow)|
 | `settings['numfreq']` | Number of frequency points in the output sweep |
 | `settings['refined_cellsize']` | Target mesh size at conductor edges |
 | `settings['Boundaries']` | Required, no built-in default. List of 6 boundary conditions, one per side (`xmin, xmax, ymin, ymax, zmin, zmax`): `'PEC'` (lossless metal box), `'PMC'` (magnetic wall, useful for symmetry), `'MUR'` (simple absorbing), or `'PML_8'` (higher-quality absorbing, much slower simulation) |
@@ -438,6 +438,8 @@ All examples read GDSII + XML stackup and write a Touchstone S-parameter file (e
 **Does `voltage=0` actually skip that port's simulation?** It depends on how the script builds its excitation list. `run_generic_nport.py` and a few other examples call `simulation_ports.all_active_excitations()` to get the list of ports to excite, which already filters out `voltage=0` ports — for those scripts, a `voltage=0` port's FDTD run is skipped entirely. Most `workflow/` examples instead hardcode which port numbers to excite (e.g. `[1]` or `[[1],[2]]`); there, `voltage=0` by itself changes nothing — you must also remove that port number from the hardcoded list yourself. Either way, a port that was never excited has no S-parameters computed for it; trying to write a Touchstone file that references one raises a clear error naming the missing S-parameter(s), rather than producing a corrupt file.
 
 **What is a good mesh size?** There's no single answer — it depends on the smallest feature (gap or line width) you need to resolve accurately, and on how much time you can afford. As a starting point, a `refined_cellsize` around 1/5 to 1/10 of your smallest critical dimension is reasonable; check convergence by comparing results at two different `refined_cellsize` values before trusting the finer one.
+
+**"Warning: Unused primitive (type: LinPoly) detected in property ..."**: These messages pop up when openEMS solver detects a layout with multiple touching metals on the same layer and same priority. It is purely cosmetic in this workflow and can be safely ignored.
 
 **Why is my simulation slow?** FDTD simulation time scales with mesh cell count and the number of time steps needed to reach `energy_limit`. Absorbing boundaries (`MUR`, and especially `PML_8`) and structures with high-Q resonances both increase the number of time steps needed. Check the mesh cell count reported at the start of the run, and whether `refined_cellsize` is finer than actually needed everywhere, not just at the features that need it.
 

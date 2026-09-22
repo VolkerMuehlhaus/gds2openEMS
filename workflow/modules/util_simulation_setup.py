@@ -22,6 +22,7 @@ import sys
 import json
 import time
 import socket
+import inspect
 
 from . import util_utilities as utilities
 from . import util_meshlines
@@ -900,10 +901,19 @@ def runSimulation (excite_portnumbers=None,
         # Check if we can read a hash file from the result folder
         existing_data_hash = get_hash_from_data_folder(excitation_path)
 
-        # Create hash of newly created CSX file, we will store that to result folder when simulation is finished.
-        # This will enable checking for pre-existing data of the exact same model.
-        XML_hash = calculate_sha256_of_file(CSX_file)
-        model_changed = (existing_data_hash != XML_hash) or force_simulation
+        # Create hash of newly created CSX file and of the calling model script (only the part of
+        # it up to and including the runSimulation() call), we will store that to result folder when
+        # simulation is finished. This will enable checking for pre-existing data of the exact same
+        # model. The calling script is included because settings like numThreads or EndCriteria are
+        # only ever passed to the solver at runtime and never end up in the CSX file, so a CSX-only
+        # hash would miss changes to them. Only hashing up to the call (not the whole file) means
+        # editing your own post-processing/plotting code below that call still doesn't force a
+        # re-solve.
+        caller_frame = inspect.stack()[1]
+        CSX_hash = calculate_sha256_of_file(CSX_file)
+        script_hash = calculate_script_hash_up_to_line(caller_frame.filename, caller_frame.lineno)
+        model_hash = calculate_combined_hash([CSX_hash, script_hash])
+        model_changed = (existing_data_hash != model_hash) or force_simulation
 
         # preview model - shown whenever requested (i.e. not no_gui), regardless of whether the
         # model hash matches a previous run. Only the FDTD solve itself is skipped below when
@@ -934,8 +944,8 @@ def runSimulation (excite_portnumbers=None,
                     run_time_seconds = int(end-start)
 
                     print('FDTD simulation completed successfully for excitation ', str(excite_portnumbers))
-                    # Now that simulation created output data, write the hash of the underlying XML model. This will help to identify existing data for this model.
-                    write_hash_to_data_folder(excitation_path, XML_hash)
+                    # Now that simulation created output data, write the hash of the underlying model. This will help to identify existing data for this model.
+                    write_hash_to_data_folder(excitation_path, model_hash)
                 except AssertionError as e:
                     print('[ERROR] AssertionError during FDTD simulation: ', e)
                     sys.exit(1)
@@ -1046,8 +1056,9 @@ def runOpenEMS (excite_ports, settings):
 
 
 # Utility functions for hash file.
-# By creating and storing a hash of CSX file to the result folder when simulation is finished,
-# we can identify pre-existing data of the exact same model. In this case, we can skip simulation.
+# By creating and storing a hash of the CSX file and of the calling model script (up to the
+# runSimulation() call) to the result folder when simulation is finished, we can identify
+# pre-existing data of the exact same model. In this case, we can skip simulation.
 
 def calculate_sha256_of_file(filename):
     import hashlib
@@ -1057,6 +1068,34 @@ def calculate_sha256_of_file(filename):
             sha256_hash.update(byte_block)
 
     return sha256_hash.hexdigest()
+
+def calculate_script_hash_up_to_line(filename, upto_line):
+    # SHA-256 of a script's content from its start through upto_line (1-indexed, inclusive) only.
+    # Used to fold the calling model script into the change-detection hash without also reacting to
+    # edits further down in that same file (e.g. post-processing/plotting code that runs after the
+    # runSimulation() call and can't affect the model itself). Missing files are hashed as empty,
+    # so a hash is still produced even if the caller can't be identified (e.g. an interactive session).
+    import hashlib
+    sha256_hash = hashlib.sha256()
+    if filename and os.path.isfile(filename):
+        with open(filename, 'rb') as f:
+            for line_number, line in enumerate(f, start=1):
+                if line_number > upto_line:
+                    break
+                sha256_hash.update(line)
+
+    return sha256_hash.hexdigest()
+
+def calculate_combined_hash(hash_values):
+    # Combine several hex-digest strings into a single hash, so that a mismatch in any of them
+    # changes the result.
+    import hashlib
+    combined_hash = hashlib.sha256()
+    for value in hash_values:
+        if value:
+            combined_hash.update(value.encode('utf-8'))
+
+    return combined_hash.hexdigest()
 
 def write_hash_to_data_folder (excitation_path, hash_value):
     filename = os.path.join(excitation_path, 'simulation_model.hash')
