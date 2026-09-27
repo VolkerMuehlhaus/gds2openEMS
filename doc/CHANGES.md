@@ -6,6 +6,12 @@ This is an (incomplete) list of changes and new features.
 
 New option `settings['fill_factor_correction']` (default `False`), ported from gds2palace: with via array merging (`merge_polygon_size > 0`), the conductivity of each merged via polygon is multiplied by its via fill factor (original via area / merged area, rounded to 2 decimals), because the stackup via conductivity is derived from the per-via resistance. Scaled vias get their own material, e.g. `TopVia2_x0.49`. See [Input files](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#input-files). With the option off, the generated model is unchanged.
 
+Stackup Editor (`stackup_editor/`), ported from setupEM:
+
+- **Stackup Preview**: metals that extend past the dielectric boundary above are drawn up to their true height, and the distance to that boundary shows as a negative value in red instead of 0. A dielectric fill layer anchored to a metal (`Reference=`, e.g. conformal passivation) is drawn at its real position, straddling the boundaries it crosses, in its own amber color; one that overlaps another conductor is flagged in orange.
+- Saving a stackup without a file extension appends `.xml`.
+- The editor pins a light color scheme, so it stays readable on Windows accounts with dark mode enabled.
+
 ## 22-Sep-2026
 
 The [hash-based skip](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#re-running-a-model-the-hash-based-skip) in `runSimulation()` now also hashes the calling model script itself (up to and including the `runSimulation()` call), not just the generated CSX file. This catches changes to solver-runtime settings like `numThreads` or `EndCriteria` that never end up in the CSX file and were previously missed, causing stale results to be silently reused. Code after the call (post-processing, plotting, ...) is still excluded from the hash, so editing that still doesn't force a re-solve. Existing `simulation_model.hash` files from before this change will mismatch once, forcing one re-simulation per cached result.

@@ -2285,6 +2285,8 @@ class StackupEditorWindow(QDialog):
         filename, _ = QFileDialog.getSaveFileName(self, "Save Stackup XML File", previous_dir, "*.xml;;*.*")
         if not filename:
             return False
+        if not filename.lower().endswith(".xml"):
+            filename += ".xml"
         return self._save_to(filename)
 
     def _compute_auto_dielectric_references(self, dielectrics_elements):
@@ -3279,6 +3281,16 @@ def main():
        _StandaloneMainWindow).
     """
     app = QApplication(sys.argv)
+
+    # Pin a light color scheme so the preview's light fills and any light field
+    # backgrounds aren't fighting an inherited dark auto-palette on accounts where
+    # Windows' per-user dark-mode setting is on (PySide6 6.5+ only; older versions
+    # just skip this)
+    try:
+        app.styleHints().setColorScheme(Qt.ColorScheme.Light)
+    except AttributeError:
+        pass
+
     if sys.platform.startswith("win"):
         # without this, Qt's default style on Windows looks visibly different
         # (fonts/widget chrome) from the platform-native style
