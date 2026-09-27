@@ -155,6 +155,8 @@ allpolygons = gds_reader.read_gds(gds_filename, layernumbers, purposelist=[0],
 
 `merge_polygon_size` applies to layers declared `Type="via"` in the XML stackup. With a non-zero value, polygons on that layer are oversized by half that distance, overlapping ones are merged, then undersized back — merging a via array into one bounding-box shape, as long as the maximum via spacing doesn't exceed the given value.
 
+Merging fills the gaps between the vias with via material, so the merged block conducts better than the real via array. The via conductivity in the SG13G2 stackup files is derived from the per-via resistance in the process specification, i.e. it is valid for the via cross section only. With `settings['fill_factor_correction'] = True`, `setupSimulation()` corrects this: each merged via polygon gets its conductivity multiplied by its fill factor, the original via area inside it divided by the merged area (rounded to 2 decimals). Polygons with different fill factors get separate materials, named like `TopVia2_x0.49`, which you can see in AppCSXCAD; single vias that were not merged keep fill factor 1 and the original material. The correction needs `merge_polygon_size > 0`, because the fill factor is calculated from the via polygons before merging: a GDSII file where via arrays were already merged into blocks (e.g. by `gds_prepare_for_EM`) gets no correction. PEC via layers are not scaled.
+
 ### Port definitions
 
 Ports are created from polygons on special GDSII layers (by convention, layer 201 and above), not by coding their position directly in Python:
@@ -280,6 +282,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 | `settings['meshsize_max']` | model-dependent | Absolute cap on coarse mesh cell size |
 | `settings['preprocess_gds']` | `False` | Legacy, now a no-op — see [Input files](#input-files) |
 | `settings['merge_polygon_size']` | `0` | Merge via-array polygons within this distance — see [Input files](#input-files) |
+| `settings['fill_factor_correction']` | `False` | Scale the conductivity of merged via arrays by their via fill factor — see [Input files](#input-files) |
 | `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list |
 | `settings['numThreads']` | automatic | Force the openEMS solver thread count — see [Forcing the solver thread count](#forcing-the-solver-thread-count) |
 | `settings['easyMesh']` | `False` | Use the easyMesh4openEMS automatic mesh generator instead of the built-in one — see [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems) |
