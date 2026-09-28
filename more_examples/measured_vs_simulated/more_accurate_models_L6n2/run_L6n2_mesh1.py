@@ -73,7 +73,7 @@ settings['unit']   = 1e-6  # geometry is in microns
 settings['margin'] = 250    # distance in microns from GDSII geometry boundary to simulation boundary
 
 settings['fstart']  = 0e9
-settings['fstop']   = 20e9
+settings['fstop']   = 14e9
 settings['numfreq'] = 401
 
 settings['refined_cellsize'] = 1 # mesh cell size in conductor region

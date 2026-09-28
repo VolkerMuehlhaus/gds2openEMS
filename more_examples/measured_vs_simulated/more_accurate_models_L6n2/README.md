@@ -10,7 +10,7 @@ This study compares openEMS FDTD simulations of the L6n2 spiral inductor with a 
   - `openEMS_SG13G2_200um.xml`: planar, with SiO2 + passivation filling the gaps between the TopMetal2 traces;
   - `openEMS_SG13G2_200um_passicut.xml`: passivation cut, used in Step 4.
 - **Solver settings:** PEC boundaries with 250 µm margin, 20 cells per wavelength at fstop, and via array merging with `merge_polygon_size = 2`.
-- **Mesh:** `refined_cellsize` is the mesh size on the conductors: 2 µm, 1 µm or 0.5 µm.
+- **Mesh:** `refined_cellsize` is the mesh size on the conductors: 2 µm or 1 µm.
 - **Software:** gds2openEMS 0.5.0 (needed for `settings['fill_factor_correction']`) and openEMS v0.0.36. All runs were on HPZ2; solve times below are for both port excitations together.
 - **Measurement:** `meas_L5_6n2_THRU_deemb.S2P`, de-embedded. It has a differential SRF of **11.07 GHz**, a peak Q of **15.96 at 4.71 GHz**, and a low-frequency differential resistance of **4.55 Ω** at 0.1 GHz.
 
@@ -35,33 +35,32 @@ Via array merging replaces each 4×4 via array by one block with the array's out
 
 The difference is 0.40 Ω, as expected. With the correction, the network converges to about 4.7 Ω on finer grids: 4.96 Ω at 1 µm, 4.78 Ω at 0.5 µm and 4.72 Ω at 0.25 µm. The measurement gives 4.55 Ω.
 
-The openEMS runs are `run_L6n2_mesh1.py` and `run_L6n2_mesh1_mergecorrection.py`, both with a 1 µm mesh, fstop 20 GHz and the default end criterion of −40 dB:
+The openEMS runs are `run_L6n2_mesh1.py` (no correction) and the 1 µm, −40 dB case of `run_L6n2_mergecorrection_sweep.py` (with correction). Both use the planar stackup, a 1 µm mesh, fstop 14 GHz and the default end criterion of −40 dB:
 
 | Model | R @ 0.1 GHz | R @ 1 GHz | L @ 1 GHz | Peak Q | SRF | Solve time |
 |---|---|---|---|---|---|---|
 | Measured | 4.55 Ω | 4.86 Ω | 5.01 nH | 15.96 @ 4.71 GHz | 11.07 GHz | |
-| Via merge, no correction | 3.45 Ω | 3.86 Ω | 4.89 nH | 13.98 @ 3.50 GHz | 9.91 GHz | 556 s |
-| Via merge + correction | 3.82 Ω | 4.24 Ω | 4.89 nH | 13.17 @ 3.65 GHz | 9.91 GHz | 534 s |
+| Via merge, no correction | 3.06 Ω | 4.03 Ω | 4.97 nH | 14.56 @ 5.04 GHz | 9.94 GHz | 643 s |
+| Via merge + correction | 3.48 Ω | 4.46 Ω | 4.97 nH | 13.87 @ 5.08 GHz | 9.94 GHz | 689 s |
 
 ![Step 1: via merge with and without fill factor correction](results/plots/step1_via_merge_correction.png)
 
-The correction adds 0.37 Ω, close to the expected 0.4 Ω. But both openEMS results are far below the hand calculation and the measurement: 3.82 Ω vs. about 4.7 Ω, with an offset of about 0.9 Ω. Inductance agrees well at low frequency, but the SRF and peak Q are too low (the passivation model, Step 4).
+The correction adds 0.42 Ω, as expected (0.40 Ω). But both openEMS results are far below the hand calculation and the measurement: 3.48 Ω vs. about 4.7 Ω, with an offset of about 1.2 Ω. Inductance agrees well at low frequency, but the SRF and peak Q are too low (the passivation model, Step 4).
 
 ## Step 2: is the low resistance a mesh effect?
 
-`run_L6n2_mesh0u5_mergecorrection.py` repeats Step 1's corrected model with a 0.5 µm mesh. The 2 µm run is `run_L6n2_mesh2_mergecorrection.py`.
+`run_L6n2_mergecorrection_sweep.py` also runs Step 1's corrected model with a 2 µm mesh. Both runs use the planar stackup, fstop 14 GHz and −40 dB:
 
 | Mesh (via merge + correction, −40 dB) | R @ 0.1 GHz | L @ 1 GHz | Peak Q | SRF | Solve time |
 |---|---|---|---|---|---|
-| 2 µm | 4.42 Ω | 4.84 nH | 12.87 @ 4.40 GHz | 9.68 GHz | 111 s |
-| 1 µm | 3.82 Ω | 4.89 nH | 13.17 @ 3.65 GHz | 9.91 GHz | 534 s |
-| 0.5 µm | 3.85 Ω | 4.89 nH | 13.93 @ 3.95 GHz | 10.17 GHz | 3,987 s |
+| 2 µm | 3.74 Ω | 4.93 nH | 13.46 @ 4.90 GHz | 9.71 GHz | 118 s |
+| 1 µm | 3.48 Ω | 4.97 nH | 13.87 @ 5.08 GHz | 9.94 GHz | 689 s |
 
-![Step 2: 2 µm, 1 µm and 0.5 µm mesh](results/plots/step2_mesh.png)
+![Step 2: 2 µm and 1 µm mesh](results/plots/step2_mesh.png)
 
-A finer mesh does not move the low-frequency resistance towards 4.7 Ω. The values scatter between 3.8 and 4.4 Ω without converging, so this is obviously not a mesh effect. The stackups were also checked: conductor conductivities, thicknesses and via fill factor are identical to the Palace model, which gives 4.69 Ω.
+A finer mesh does not move the low-frequency resistance towards 4.7 Ω; the 1 µm result is even further away. So this is obviously not a mesh effect. The stackups were also checked: conductor conductivities, thicknesses and via fill factor are identical to the Palace model, which gives 4.69 Ω.
 
-## Step 3: the energy end criterion
+## Step 3a: the energy end criterion, synthetic testcase
 
 openEMS stops the simulation when the energy left in the model has dropped below `settings['energy_limit']`, which is −40 dB in all runs so far.
 
@@ -76,28 +75,35 @@ A synthetic testcase isolates the effect: a straight TopMetal2 line, 8 µm wide,
 
 At −40 dB, R and L at low frequency are off by 6–26%, and R even falls with frequency. At −60 dB, both are correct. A 45° line gave the same picture (0.475 Ω vs. 0.411 Ω at −40 dB), so the staircase approximation of diagonal traces is not the cause either.
 
-`run_L6n2_mergecorrection_sweep.py` then repeats the L6n2 model (1 µm mesh, via merge + correction, fstop 14 GHz) at three end criteria:
+## Step 3b: the energy end criterion, applied to inductor model
 
-| End criterion | Timesteps (pulse) | R @ 0.1 GHz | R @ 1 GHz | L @ 1 GHz | Peak Q | SRF | Solve time |
+`run_L6n2_mergecorrection_sweep.py` repeats the L6n2 model (1 µm mesh, via merge + correction, fstop 14 GHz) at three end criteria:
+
+| End criterion | Timesteps | R @ 0.1 GHz | R @ 1 GHz | L @ 1 GHz | Peak Q | SRF | Solve time |
 |---|---|---|---|---|---|---|---|
-| −40 dB (fstop 20 GHz, Step 1) | about 165 k (176 k) | 3.82 Ω | 4.24 Ω | 4.89 nH | 13.17 @ 3.65 GHz | 9.91 GHz | 534 s |
-| −40 dB | about 247 k (251 k) | 3.48 Ω | 4.46 Ω | 4.97 nH | 13.87 @ 5.08 GHz | 9.94 GHz | 689 s |
-| −50 dB | about 301 k (251 k) | 4.56 Ω | 5.12 Ω | 4.85 nH | 13.89 @ 4.27 GHz | 9.93 GHz | 701 s |
-| −60 dB | about 471 k (251 k) | **4.68 Ω** | 5.16 Ω | 4.83 nH | 13.76 @ 4.27 GHz | 9.92 GHz | 1,201 s |
+| −40 dB | about 247 k | 3.48 Ω | 4.46 Ω | 4.97 nH | 13.87 @ 5.08 GHz | 9.94 GHz | 689 s |
+| −50 dB | about 301 k | 4.56 Ω | 5.12 Ω | 4.85 nH | 13.89 @ 4.27 GHz | 9.93 GHz | 701 s |
+| −60 dB | about 471 k | **4.68 Ω** | 5.16 Ω | 4.83 nH | 13.76 @ 4.27 GHz | 9.92 GHz | 1,201 s |
 
 ![Step 3: end criterion −40, −50 and −60 dB](results/plots/step3_energy_limit.png)
 
-At −60 dB, the low-frequency resistance is 4.68 Ω: it matches the DC hand calculation (about 4.7 Ω) and the Palace result (4.69 Ω), and it is close to the measurement (4.55 Ω). The two −40 dB runs don't even agree with each other (3.82 Ω and 3.48 Ω), although they differ only in fstop, which changes the excitation pulse and the coarse outer mesh. SRF is unaffected by the end criterion.
+At −60 dB, the low-frequency resistance is 4.68 Ω: it matches the DC hand calculation (about 4.7 Ω) and the Palace result (4.69 Ω), and it is close to the measurement (4.55 Ω). SRF is unaffected by the end criterion.
 
-Why −40 dB fails is visible in the raw openEMS signals. The excitation pulse is not short of low-frequency content: its power at 0.1 GHz is 13.5 dB below its peak, for both the 14 GHz and the 20 GHz pulse.
+Why −40 dB fails is visible in the raw openEMS signals. The excitation pulse is not short of low-frequency content: its power at 0.1 GHz is 13.5 dB below its peak.
 
-![Excitation power spectrum, fstop 20 GHz vs. 14 GHz](results/plots/L6n2_excitation_spectrum_fstop14_vs_20.png)
+![Excitation power spectrum, fstop 14 GHz](results/plots/L6n2_excitation_spectrum.png)
 
-The problem is when the run stops. Timesteps are read from the end of the port probe signal (time step 1.63 fs); the value in brackets is the length of the excitation pulse. Both −40 dB runs stop at about the end of their excitation pulse, while the port 2 voltage is still only 36–38 dB below its maximum. The −40 dB run with fstop 14 GHz is identical to the −60 dB run up to that point. The −60 dB run continues to about 770 ps, until port 2 is 77 dB below its maximum.
+The problem is when the run stops. The time step is 1.63 fs, and the excitation pulse lasts 409 ps (251 k steps). Timesteps above are read from the end of the port probe signal.
+
+- The −40 dB run stops at the end of the excitation pulse (402 ps), while the port 2 voltage is still only 38 dB below its maximum.
+- The −50 dB run continues to 491 ps (port 2 at −60 dB).
+- The −60 dB run continues to 768 ps (port 2 at −77 dB).
+
+All three runs are identical up to the point where each one stops; the end criterion only decides how much of the response is recorded.
 
 ![Port 1 and port 2 voltages in the time domain, dB scale](results/plots/L6n2_port_voltages_time_domain.png)
 
-On a linear scale, what the −40 dB runs miss is a small exponential tail after the pulse, about 0.05 µV compared with a peak of about 20 µV. Its fitted time constant is 34–42 ps. That is the same order as the coil's L/R time constant with both 50 Ω ports connected: 4.82 nH / (100 Ω + 4.7 Ω) ≈ 46 ps. This tail is the inductor's low-frequency response, and the −40 dB runs stop just as it begins.
+On a linear scale, what the −40 dB run misses is a small exponential tail after the pulse, about 0.03 µV at 420 ps compared with a peak of about 20 µV. Its fitted time constant is 34–42 ps. That is the same order as the coil's L/R time constant with both 50 Ω ports connected: 4.82 nH / (100 Ω + 4.7 Ω) ≈ 46 ps. This tail is the inductor's low-frequency response. The −40 dB run stops just as it begins; the −50 dB run captures most of it, which is why −50 dB is already close to the −60 dB result.
 
 ![Port 1 and port 2 voltages, linear scale, with zoom on the tail](results/plots/L6n2_port_voltages_time_domain_linear.png)
 
@@ -125,35 +131,37 @@ Refining to 1 µm gives the final result:
 |---|---|---|---|---|---|---|
 | Measured | 4.55 Ω | 4.86 Ω | 5.01 nH | 15.96 @ 4.71 GHz | 11.07 GHz | |
 | 2 µm mesh | 4.66 Ω | 5.16 Ω | 4.81 nH | 14.31 @ 4.87 GHz | 10.80 GHz | 361 s |
-| 1 µm mesh | **4.68 Ω** | **5.14 Ω** | **4.81 nH** | **14.52 @ 4.72 GHz** | **10.93 GHz** | 8,469 s |
+| 1 µm mesh | **4.67 Ω** | **5.14 Ω** | **4.81 nH** | **14.54 @ 4.72 GHz** | **11.08 GHz** | 2,037 s |
 
 ![Step 4: passivation cut, 2 µm vs. 1 µm mesh](results/plots/step4_passicut_1um.png)
 
-The final model agrees with the measurement within 3% in low-frequency resistance, 4% in inductance, 1.3% in SRF and 9% in peak Q. The peak Q frequency is 4.72 GHz vs. 4.71 GHz measured. The 2 µm mesh is already close, at about 1/23 of the solve time.
+The final model agrees with the measurement within 3% in low-frequency resistance, 4% in inductance, 0.1% in SRF and 9% in peak Q. The peak Q frequency is 4.72 GHz vs. 4.71 GHz measured. The 2 µm mesh is already close, at about 1/6 of the solve time.
+
+These 1 µm results use the z mesher from 28-Sep-2026 (gds2openEMS `util_meshlines.create_z_mesh()`). The previous mesher placed a TopMetal2 subdivision line 0.1 µm from the passivation top, which lies inside TopMetal2 in this stackup. That tiny cell forced a small FDTD time step. With the old mesh, the same model gave SRF 10.93 GHz and peak Q 14.52, and took 8,469 s instead of 2,037 s. Resistance and inductance were the same.
 
 ## Comparison: measurement, openEMS and gds2palace
 
-Both solvers at 2 µm mesh, the accuracy vs. cost winner in both studies:
+The final openEMS model from Step 4 against the model the gds2palace study recommends:
 
-- **openEMS:** passivation cut, via merge + correction, −60 dB end criterion. In Step 4, the 1 µm mesh gained only 0.1 GHz in SRF and 0.2 in peak Q, at 23× the solve time.
-- **Palace:** the model the gds2palace study recommends: conformal passivation, filled metals (volume mesh), via merge + correction. That study found its 1 µm run changed very little at twice the cost. Its S-parameters are copied to `results/palace_L6n2_with_ports_2um_passi3D.s2p`.
+- **openEMS:** passivation cut, via merge + correction, 1 µm mesh, −60 dB end criterion.
+- **Palace:** conformal passivation, filled metals (volume mesh), via merge + correction, 2 µm mesh. That study found its 1 µm run changed very little at twice the cost. Its S-parameters are copied to `results/palace_L6n2_with_ports_2um_passi3D.s2p`.
 
-| Model (2 µm mesh) | R @ 0.1 GHz | R @ 1 GHz | L @ 1 GHz | Peak Q | SRF | Solve time |
+| Model | R @ 0.1 GHz | R @ 1 GHz | L @ 1 GHz | Peak Q | SRF | Solve time |
 |---|---|---|---|---|---|---|
 | Measured | 4.55 Ω | 4.86 Ω | 5.01 nH | 15.96 @ 4.71 GHz | 11.07 GHz | |
-| openEMS: passivation cut, −60 dB | 4.66 Ω | 5.16 Ω | 4.81 nH | 14.31 @ 4.87 GHz | 10.80 GHz | 6 min 1 s |
-| Palace: conformal passivation, filled metals | 4.69 Ω | 5.07 Ω | 4.90 nH | 14.67 @ 4.60 GHz | 10.96 GHz | 34 min 29 s |
+| openEMS: passivation cut, 1 µm mesh, −60 dB | 4.67 Ω | 5.14 Ω | 4.81 nH | 14.54 @ 4.72 GHz | 11.08 GHz | 33 min 57 s |
+| Palace: conformal passivation, filled metals, 2 µm mesh | 4.69 Ω | 5.07 Ω | 4.90 nH | 14.67 @ 4.60 GHz | 10.96 GHz | 34 min 29 s |
 
-![openEMS and Palace vs. measurement, both at 2 µm mesh](results/plots/openems_vs_palace.png)
+![openEMS (1 µm mesh) and Palace (2 µm mesh) vs. measurement](results/plots/openems_vs_palace.png)
 
 The two solvers agree with each other within:
 
-- 0.6% in low-frequency resistance;
-- 1.9% in inductance;
-- 2.5% in peak Q;
-- 1.5% in SRF.
+- 0.3% in low-frequency resistance;
+- 1.8% in inductance;
+- 0.9% in peak Q;
+- 1.1% in SRF.
 
-Both deviate from the measurement the same way: low-frequency resistance about 3% high, inductance 2–4% low, and peak Q 8–10% low. The SRF is 1.0% low for Palace and 2.4% low for openEMS.
+Both deviate from the measurement the same way: low-frequency resistance about 3% high, inductance 2–4% low, and peak Q 8–9% low. The SRF is 0.1% high for openEMS and 1.0% low for Palace.
 
 Note that the two use different passivation models: Palace uses the conformal 3D passivation from derived layers, openEMS the passivation cut stackup. The openEMS solve time is the sum of both port excitations on HPZ2; the Palace solve time is the value reported in the gds2palace study.
 
@@ -162,4 +170,4 @@ Note that the two use different passivation models: Palace uses the conformal 3D
 - `run_*.py`: the openEMS model scripts. Results go to `output/`, which is not in git.
 - `results/*.s2p`: the S-parameters used in this README. `palace_L6n2_with_ports_2um_passi3D.s2p` is copied from the gds2palace study.
 - `results/plot_study.py`: regenerates the L/Q/R plots in `results/plots/` from those files.
-- `results/plot_time_signals.py`: regenerates the excitation spectrum and port voltage plots. It needs the raw time signals in `output/`, so rerun `run_L6n2_mesh1_mergecorrection.py` and `run_L6n2_mergecorrection_sweep.py` first.
+- `results/plot_time_signals.py`: regenerates the excitation spectrum and port voltage plots. It needs the raw time signals in `output/`, so rerun `run_L6n2_mergecorrection_sweep.py` first.

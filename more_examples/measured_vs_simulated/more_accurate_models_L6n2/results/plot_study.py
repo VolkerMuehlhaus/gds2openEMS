@@ -28,25 +28,24 @@ def run(name, label):
 
 MEAS = (os.path.join(study_dir, "meas_L5_6n2_THRU_deemb.S2P"), "Measured (de-embedded)")
 MESH1 = run("run_L6n2_mesh1", "Sim: via merge, no correction, 1 µm mesh")
-MESH1_CORR = run("run_L6n2_mesh1_mergecorrection", "Sim: via merge + correction, 1 µm mesh")
-MESH2_CORR = run("run_L6n2_mesh2_mergecorrection", "Sim: via merge + correction, 2 µm mesh")
-MESH0U5_CORR = run("run_L6n2_mesh0u5_mergecorrection", "Sim: via merge + correction, 0.5 µm mesh")
 E40 = run("run_L6n2_mergecorrection_sweep_mesh1_limit-40", "Sim: end criterion -40 dB")
+E40_2UM = run("run_L6n2_mergecorrection_sweep_mesh2_limit-40", "Sim: via merge + correction, 2 µm mesh")
+E40_CORR = run("run_L6n2_mergecorrection_sweep_mesh1_limit-40", "Sim: via merge + correction, 1 µm mesh")
 E50 = run("run_L6n2_mergecorrection_sweep_mesh1_limit-50", "Sim: end criterion -50 dB")
 E60 = run("run_L6n2_mergecorrection_sweep_mesh1_limit-60", "Sim: end criterion -60 dB")
 PLANAR_2UM = run("run_L6n2_mergecorrection_sweep_mesh2_limit-60", "Sim: planar passivation, 2 µm mesh")
 PASSICUT_2UM = run("run_L6n2_mergecorrection_passicut_sweep_mesh2_limit-60", "Sim: passivation cut, 2 µm mesh")
 PASSICUT_1UM = run("run_L6n2_mergecorrection_passicut_sweep_mesh1_limit-60", "Sim: passivation cut, 1 µm mesh")
-OEMS_2UM = run("run_L6n2_mergecorrection_passicut_sweep_mesh2_limit-60", "openEMS: passivation cut, 2 µm mesh, -60 dB")
+OEMS_1UM = run("run_L6n2_mergecorrection_passicut_sweep_mesh1_limit-60", "openEMS: passivation cut, 1 µm mesh, -60 dB")
 PALACE_REC = run("palace_L6n2_with_ports_2um_passi3D", "Palace: conformal passivation, filled metals, 2 µm mesh")
 
 PLOTS = {
-    "step1_via_merge_correction.png": [MEAS, MESH1, MESH1_CORR],
-    "step2_mesh.png": [MEAS, MESH2_CORR, MESH1_CORR, MESH0U5_CORR],
+    "step1_via_merge_correction.png": [MEAS, MESH1, E40_CORR],
+    "step2_mesh.png": [MEAS, E40_2UM, E40_CORR],
     "step3_energy_limit.png": [MEAS, E40, E50, E60],
     "step4_passicut_2um.png": [MEAS, PLANAR_2UM, PASSICUT_2UM],
     "step4_passicut_1um.png": [MEAS, PASSICUT_2UM, PASSICUT_1UM],
-    "openems_vs_palace.png": [MEAS, OEMS_2UM, PALACE_REC],
+    "openems_vs_palace.png": [MEAS, OEMS_1UM, PALACE_REC],
 }
 
 colors = ['b', 'r', 'm', 'c', 'g', 'y', 'k', 'w']
