@@ -107,6 +107,42 @@ def plot(entries, out_path):
     print("wrote", out_path)
 
 
+def plot_ripple(reference, others, pulse_center_ps, out_path, fmax_ghz=8):
+    """Difference in differential resistance of each run vs. a reference run of the same model.
+    others: list of (path, label, stop_time_ps). S-parameters are referenced to the incident pulse,
+    so the ripple period is 1/(stop time - pulse center), with a zero crossing every half period."""
+    ref = rf.Network(reference[0])
+    fr, Rr, _, _ = get_diff_model(ref['100-' + str(int(max(ref.frequency.f) / 1e6)) + 'mhz'])
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    ax.axhline(0, color='k', linewidth=0.8)
+    for n, (path, label, stop_ps) in enumerate(others):
+        nw = rf.Network(path)
+        freq, R, _, _ = get_diff_model(nw['100-' + str(int(max(nw.frequency.f) / 1e6)) + 'mhz'])
+        m = freq <= fmax_ghz * 1e9
+        dR = (R - Rr)[m]
+        ymax = max(ymax, abs(dR).max()) if n else abs(dR).max()
+        ax.plot(freq[m] / 1e9, dR, color=colors[n % 8], linestyle=linestyles[n % 8],
+                label=f"{label}: stops {stop_ps - pulse_center_ps:.0f} ps after pulse center, "
+                      f"expected ripple period {1e3 / (stop_ps - pulse_center_ps):.1f} GHz")
+    ax.set_xlim(0, fmax_ghz)
+    ax.set_ylim(-1.2 * ymax, 1.2 * ymax)
+    ax.set_xlabel("Frequency (GHz)")
+    ax.set_ylabel("Diff. resistance minus " + reference[1] + " (Ohm)")
+    ax.set_title("Truncation ripple: difference to the " + reference[1] + " run")
+    ax.legend(fontsize=9)
+    ax.grid()
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=125)
+    plt.close(fig)
+    print("wrote", out_path)
+
+
 os.makedirs(out_dir, exist_ok=True)
 for name, entries in PLOTS.items():
     plot(entries, os.path.join(out_dir, name))
+
+# stop times from the end of the port probe signals, see plot_time_signals.py
+plot_ripple((E60[0], "-60 dB"),
+            [(E40[0], "end criterion -40 dB", 401.8), (E50[0], "end criterion -50 dB", 491.1)],
+            204.7,  # center of the 409 ps fstop 14 GHz excitation pulse
+            os.path.join(out_dir, "step3_ripple.png"))

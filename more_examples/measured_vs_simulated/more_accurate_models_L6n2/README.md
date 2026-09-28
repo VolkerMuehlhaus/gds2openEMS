@@ -107,6 +107,15 @@ On a linear scale, what the −40 dB run misses is a small exponential tail afte
 
 ![Port 1 and port 2 voltages, linear scale, with zoom on the tail](results/plots/L6n2_port_voltages_time_domain_linear.png)
 
+The error from stopping early is not a constant offset but a ripple across frequency. The difference to the −60 dB run oscillates, with a period set by how long the run continues after the centre of the excitation pulse (205 ps). S-parameters are referenced to the incident pulse, so a run that stops a time t after the pulse centre shows a ripple period of about 1/t:
+
+- −40 dB stops 197 ps after the pulse centre, so about 5.1 GHz is expected. Its resistance difference crosses zero at 1.6, 4.6 and 7.3 GHz, swinging between −1.4 and +0.8 Ω below 7 GHz.
+- −50 dB stops 286 ps after the pulse centre, so about 3.5 GHz is expected, with 5–10× smaller amplitude (within ±0.2 Ω below 7 GHz).
+
+The low-frequency end is simply where the −40 dB ripple happens to be at its largest negative value.
+
+![Truncation ripple: resistance difference to the −60 dB run](results/plots/step3_ripple.png)
+
 **Conclusion:** for the low-frequency resistance of an inductor, use `settings['energy_limit'] = -60`, or at least −50 dB. On the 1 µm mesh this costs about 1.7× the solve time of −40 dB.
 
 ## Step 4: planar vs. cut passivation
