@@ -4,6 +4,10 @@ This is an (incomplete) list of changes and new features.
 
 ## 28-Sep-2026
 
+Rewrote the z mesher `util_meshlines.create_z_mesh()`. Metal subdivision lines now respect dielectric interfaces inside a metal, and z lines closer than 1 nm are merged. The old code created unnecessarily small cells in some cases: 0.1 µm instead of 0.4 µm for the L6n2 passivation-cut stackup at 0.8–1.4 µm `refined_cellsize`, and sub-picometer cells from floating point noise in `Reference=` stackups with the MIM layer. Both force a very small FDTD time step. For standard stackups, the z mesh is unchanged. A scan over all example stackups and `refined_cellsize` 0.3–3 µm changed only the cases with these artifacts. The previous function is still available as `create_z_mesh_legacy`, see [Meshing](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#meshing).
+
+`settings['air_around']` as a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` now works, as the user guide already stated. Previously the mesh functions only accepted a single value and failed on a list.
+
 `setupSimulation()` now warns when a field dump's `source_layernum` has no polygons. The dump box then silently covered the bounding box of the entire layout, which happens when the dump layer was not passed to `read_gds()`. The fix is to add `layernumbers.extend(field_dumps.dumplayers)` before `read_gds()`; the [Field dumps](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#field-dumps) section now says so.
 
 ## 27-Sep-2026

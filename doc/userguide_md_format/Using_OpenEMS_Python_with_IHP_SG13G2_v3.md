@@ -212,6 +212,15 @@ The default in all examples is **automatic meshing based on geometry**: mesh lin
 
 ![Automatic meshing](./images/meshing_example.png)
 
+In z direction, mesh lines come from the stackup. Every dielectric boundary and the bottom and top of every metal and via layer used in the layout get a mesh line, and lines closer than 1 nm are merged into one. Metals are then subdivided:
+
+- a metal up to 3× `refined_cellsize` thick is divided into cells of about `refined_cellsize`, split at any dielectric interface inside it (e.g. a passivation that cuts TopMetal2 halfway), so no subdivision line lands next to such an interface;
+- a thicker metal gets one extra line at `refined_cellsize` from its bottom and top surface.
+
+Dielectrics are graded between these lines, up to the maximum cell size. So the smallest z cell is set by the thinnest layer actually used, not by the meshing rules.
+
+Before 28-Sep-2026, the z mesh placed metal subdivision lines without regard to interfaces inside the metal, which created very small cells in some stackups (0.1 µm in the L6n2 passivation-cut stackup at 1 µm `refined_cellsize`). To reproduce results from that version, set `settings['z_mesh_function'] = util_meshlines.create_z_mesh_legacy`.
+
 The default meshing method described above is reliable and easy to work with, and is a good choice for most models. The optional example `more_examples/easyMesh/` demonstrates an alternative meshing engine, shown for information — in most cases the two approaches are equivalent, and neither is a general replacement for the other. See chapter [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems).
 
 ### Running the model: preview, mesh, simulate
@@ -283,7 +292,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 | `settings['preprocess_gds']` | `False` | Legacy, now a no-op — see [Input files](#input-files) |
 | `settings['merge_polygon_size']` | `0` | Merge via-array polygons within this distance — see [Input files](#input-files) |
 | `settings['fill_factor_correction']` | `False` | Scale the conductivity of merged via arrays by their via fill factor — see [Input files](#input-files) |
-| `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list |
+| `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` |
 | `settings['numThreads']` | automatic | Force the openEMS solver thread count — see [Forcing the solver thread count](#forcing-the-solver-thread-count) |
 | `settings['easyMesh']` | `False` | Use the easyMesh4openEMS automatic mesh generator instead of the built-in one — see [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems) |
 | `settings['field_dumps']` | none | A `simulation_setup.all_field_dumps()` object — see [Field dumps](#field-dumps) |
