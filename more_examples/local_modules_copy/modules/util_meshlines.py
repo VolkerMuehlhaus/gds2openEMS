@@ -48,7 +48,134 @@ def get_margins (margin):
     return margin_xmin, margin_xmax, margin_ymin, margin_ymax
 
 
+# z mesh lines closer than this (in drawing units, 1 nm for micron) are treated as one line.
+# Stackup z positions computed from Reference chains differ by floating point noise, e.g.
+# 90.38030000000002 vs. 90.3803, which would otherwise create a sub-picometer cell.
+Z_SNAP = 1e-3
+
+
+def _merge_close_lines(values, tolerance=Z_SNAP):
+    """Sorted list of values with values closer than tolerance merged (the first one is kept)"""
+    merged = []
+    for value in sorted(values):
+        if not merged or value - merged[-1] > tolerance:
+            merged.append(value)
+    return merged
+
+
+def get_air_around (antenna_margin):
+    """Extra air around the model from settings['air_around']: single value for all sides, or a
+    list of 6 values xmin, xmax, ymin, ymax, zmin, zmax
+
+    Return value: air at xmin, xmax, ymin, ymax, zmin, zmax
+    """
+    if isinstance(antenna_margin, (list, tuple)):
+        if len(antenna_margin) == 6:
+            return tuple(antenna_margin)
+        print('Error: expected air_around to be a single value or a list of 6 values:')
+        print('[xmin, xmax, ymin, ymax, zmin, zmax]')
+        print('but instead we have this: ', str(antenna_margin))
+        exit(1)
+    return (antenna_margin,)*6
+
+
 def create_z_mesh(mesh, dielectrics_list, metals_list, target_cellsize, max_cellsize, antenna_margin, exclude_list):
+    """Create z mesh lines for the stackup.
+
+    Hard lines are placed at all physical interfaces: dielectric boundaries, and bottom/top of all
+    used metal and via layers. Soft lines subdivide the metals, and they are placed with knowledge
+    of the hard lines, so that a dielectric interface inside a metal (e.g. a passivation cut
+    halfway up TopMetal2) never ends up next to an independently placed subdivision line:
+    - metal thickness <= 3 * target_cellsize: each piece of the metal between hard lines is
+      divided into equal cells of about target_cellsize (a piece up to 1.5 cells stays one cell)
+    - thicker metals: one line at target_cellsize from bottom and top surface, graded in
+      between by smoothing; skipped where a hard line is already closer than target_cellsize/2
+    - vias: hard lines at bottom and top only
+    Dielectrics are then filled by the gap rule (no neighbor cell more than 3x larger) and
+    SmoothMeshLines, as before.
+
+    The previous implementation is available as create_z_mesh_legacy, to reproduce older results
+    with settings['z_mesh_function'] = util_meshlines.create_z_mesh_legacy
+    """
+
+    margin_zmin, margin_zmax = get_air_around(antenna_margin)[4:6]
+
+    used_metals = [metal for metal in metals_list.metals
+                   if metal.name not in exclude_list and metal.is_used]
+
+    # hard lines: physical interfaces
+    hard = [0.0]
+    for dielectric in dielectrics_list.dielectrics:
+        zmin, zmax = dielectric.zmin, dielectric.zmax
+        if dielectric.is_top:
+            zmax = zmax + margin_zmax
+        if dielectric.is_bottom:
+            zmin = zmin - margin_zmin
+        hard.extend([zmin, zmax])
+    for metal in used_metals:
+        hard.extend([metal.zmin, metal.zmax])
+    hard = np.array(_merge_close_lines(hard))
+
+    def near_hard(value, distance):
+        return np.min(np.abs(hard - value)) < distance
+
+    # soft lines: metal subdivision, aware of the hard lines
+    soft = []
+    for metal in used_metals:
+        if metal.is_via:
+            continue
+        metal_thickness = metal.zmax - metal.zmin
+        if metal_thickness > 3*target_cellsize:
+            # thick metal: refine at both surfaces, let smoothing fill the inside
+            for value in (metal.zmin + target_cellsize, metal.zmax - target_cellsize):
+                if not near_hard(value, target_cellsize/2):
+                    soft.append(value)
+        else:
+            # split the metal at interfaces inside it, then divide each piece equally
+            cellsize = min(target_cellsize, metal_thickness)
+            inside = hard[(hard > metal.zmin + Z_SNAP) & (hard < metal.zmax - Z_SNAP)]
+            bounds = [metal.zmin] + list(inside) + [metal.zmax]
+            for start, stop in zip(bounds[:-1], bounds[1:]):
+                # same division as add_equal_meshlines(): a piece up to 1.5 cells stays one cell
+                if stop - start > 1.5*cellsize:
+                    n = math.ceil((stop - start)/cellsize)
+                    soft.extend(np.linspace(start, stop, n + 1)[1:-1])
+
+    for value in _merge_close_lines(list(hard) + soft):
+        mesh.AddLine('z', value)
+
+    # dielectrics: no cell more than 3x larger than its neighbor, then smoothing
+    def add_missing_lines (direction):
+        lines = mesh.GetLines(direction, do_sort=True)
+        added_something = False
+        for index in range(1, len(lines)-1):
+            previous_dist = lines[index] - lines[index-1]
+            this_dist = lines[index+1] - lines[index]
+            ratio = this_dist/previous_dist
+            if ratio > 3:
+                mesh.AddLine(direction, lines[index] + this_dist/2)
+                added_something = True
+            elif ratio < 1/3:
+                mesh.AddLine(direction, lines[index] - previous_dist/2)
+                added_something = True
+        return added_something
+
+    while add_missing_lines('z'):
+        pass
+
+    mesh.SmoothMeshLines('z', max_cellsize, 1.3)
+
+    # safety net: smoothing must not leave near-duplicate lines either
+    lines = mesh.GetLines('z', do_sort=True)
+    merged = _merge_close_lines(lines)
+    if len(merged) != len(lines):
+        mesh.SetLines('z', merged)
+
+    return mesh
+
+
+def create_z_mesh_legacy(mesh, dielectrics_list, metals_list, target_cellsize, max_cellsize, antenna_margin, exclude_list):
+    # previous z mesher, kept unchanged to reproduce results created before 28-Sep-2026
 
     class mesh_stackup_layer:
         # dielectric layer for meshing control
@@ -189,6 +316,7 @@ def create_z_mesh(mesh, dielectrics_list, metals_list, target_cellsize, max_cell
 def create_standard_xy_mesh(mesh, allpolygons, margin, antenna_margin, target_cellsize, max_cellsize):
 
     margin_xmin, margin_xmax, margin_ymin, margin_ymax  = get_margins (margin)
+    air_xmin, air_xmax, air_ymin, air_ymax = get_air_around(antenna_margin)[0:4]
     
    
     # geometry region
@@ -196,11 +324,11 @@ def create_standard_xy_mesh(mesh, allpolygons, margin, antenna_margin, target_ce
     add_equal_meshlines(mesh, 'y', allpolygons.get_ymin(), allpolygons.get_ymax(), target_cellsize)
 
     # margins
-    add_graded_meshlines (mesh, 'x', allpolygons.get_xmin(), allpolygons.get_xmin() - (margin_xmin+antenna_margin), -1.5*target_cellsize, 1.3, -max_cellsize)
-    add_graded_meshlines (mesh, 'x', allpolygons.get_xmax(), allpolygons.get_xmax() + (margin_xmax+antenna_margin),  1.5*target_cellsize, 1.3,  max_cellsize)    
+    add_graded_meshlines (mesh, 'x', allpolygons.get_xmin(), allpolygons.get_xmin() - (margin_xmin+air_xmin), -1.5*target_cellsize, 1.3, -max_cellsize)
+    add_graded_meshlines (mesh, 'x', allpolygons.get_xmax(), allpolygons.get_xmax() + (margin_xmax+air_xmax),  1.5*target_cellsize, 1.3,  max_cellsize)    
     
-    add_graded_meshlines (mesh, 'y', allpolygons.get_ymin(), allpolygons.get_ymin() - (margin_ymin+antenna_margin), -1.5*target_cellsize, 1.3, -max_cellsize)
-    add_graded_meshlines (mesh, 'y', allpolygons.get_ymax(), allpolygons.get_ymax() + (margin_ymax+antenna_margin),  1.5*target_cellsize, 1.3,  max_cellsize)    
+    add_graded_meshlines (mesh, 'y', allpolygons.get_ymin(), allpolygons.get_ymin() - (margin_ymin+air_ymin), -1.5*target_cellsize, 1.3, -max_cellsize)
+    add_graded_meshlines (mesh, 'y', allpolygons.get_ymax(), allpolygons.get_ymax() + (margin_ymax+air_ymax),  1.5*target_cellsize, 1.3,  max_cellsize)    
     
     return mesh
 
@@ -280,11 +408,15 @@ def create_xy_mesh_from_polygons (mesh, allpolygons, margin, antenna_margin, tar
     weighted_meshlines_y.addPolyEdge(allpolygons.get_ymin() - margin_ymin)
     weighted_meshlines_y.addPolyEdge(allpolygons.get_ymax() + margin_ymax)
 
-    if antenna_margin>0:
-        weighted_meshlines_x.addPolyEdge(allpolygons.get_xmin() - margin_xmin - antenna_margin)
-        weighted_meshlines_x.addPolyEdge(allpolygons.get_xmax() + margin_xmax + antenna_margin)
-        weighted_meshlines_y.addPolyEdge(allpolygons.get_ymin() - margin_ymin - antenna_margin)
-        weighted_meshlines_y.addPolyEdge(allpolygons.get_ymax() + margin_ymax + antenna_margin)
+    air_xmin, air_xmax, air_ymin, air_ymax = get_air_around(antenna_margin)[0:4]
+    if air_xmin > 0:
+        weighted_meshlines_x.addPolyEdge(allpolygons.get_xmin() - margin_xmin - air_xmin)
+    if air_xmax > 0:
+        weighted_meshlines_x.addPolyEdge(allpolygons.get_xmax() + margin_xmax + air_xmax)
+    if air_ymin > 0:
+        weighted_meshlines_y.addPolyEdge(allpolygons.get_ymin() - margin_ymin - air_ymin)
+    if air_ymax > 0:
+        weighted_meshlines_y.addPolyEdge(allpolygons.get_ymax() + margin_ymax + air_ymax)
     
 
     # step 1: create lines at all polygon edges

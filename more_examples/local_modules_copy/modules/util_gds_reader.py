@@ -18,11 +18,15 @@
 
 # Extract objects from layers in GDSII file
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 
 import gdspy
 import numpy as np
 import os
+
+from shapely import STRtree, unary_union
+from shapely.geometry import Polygon as ShapelyPolygon
+from shapely.validation import make_valid
 
 # check that we have gdspy version 1.6.x or later
 # gdspy 1.4.2 is known for issues with our geometries
@@ -166,6 +170,7 @@ class gds_polygon:
     self.layernum = layernum
     self.is_port = False
     self.is_via = False
+    self.fill_factor = 1.0   # via array fill factor, set by compute_via_fill_factors()
     self.CSXpoly = None
     
   def add_vertex (self, x,y):
@@ -206,6 +211,23 @@ class all_polygons_list:
     """
     self.polygons = []
     self.bounding_box = all_bounding_box_list() # manages bounding box per layer and global
+    # {layernum: unmerged via point arrays}, filled for via layers where via array merging ran
+    self.via_originals = {}
+
+  def compute_via_fill_factors (self):
+    """Set fill_factor on every polygon of a via layer that went through via array merging,
+    from its overlap with the unmerged vias. Polygons on other layers keep fill_factor 1.0.
+    """
+    for layernum, original_vias in self.via_originals.items():
+      layer_polys = [poly for poly in self.polygons if poly.layernum == layernum]
+      pieces = [np.column_stack((poly.pts_x, poly.pts_y)) for poly in layer_polys]
+      fill_factors, found_fraction = via_fill_factors(pieces, original_vias)
+      for poly, fill_factor in zip(layer_polys, fill_factors):
+        poly.fill_factor = fill_factor
+      # every bit of via area must end up in exactly one merged polygon
+      if abs(found_fraction - 1.0) > 0.01:
+        print(f'Warning: via fill factors on layer {layernum} account for {100*found_fraction:.1f}% '
+              f'of the original via area, expected 100%. Fill factors on this layer may be inaccurate.')
 
   def append (self, poly):
     """Append one instance of gds_polygon
@@ -336,6 +358,8 @@ class all_polygons_list:
     
     for polygon in another_polygons_list.polygons:
       self.polygons.append(polygon)
+    for layernum, original_vias in another_polygons_list.via_originals.items():
+      self.via_originals.setdefault(layernum, []).extend(original_vias)
     # also merge boundary information  
     self.bounding_box.merge(another_polygons_list.bounding_box)          
 
@@ -496,6 +520,44 @@ def merge_via_array (polygons, maxspacing):
   return mergedpolygonset.polygons 
 
 
+def via_fill_factors (pieces, original_vias):
+  """Fill factor of each merged via polygon: the fraction of its area covered by the original,
+  unmerged vias (1.0 for a single unmerged via, < 1 where merging filled the gaps between vias).
+
+  Args:
+      pieces (list of point arrays): merged via polygons, [[x1,y1],[x2,y2],...] each
+      original_vias (list of point arrays): unmerged via polygons of the same layer
+
+  Returns:
+      list of float: fill factor per piece
+      float: fraction of the original via area found inside the pieces, 1.0 if nothing was lost
+  """
+
+  # Area intersection instead of a point-in-polygon test: stays correct for vias lying exactly
+  # on the merged outline, vias split across pieces by max_points fracturing, and duplicate or
+  # overlapping vias (unary_union counts shared area once, so the result never exceeds 1).
+  originals = [make_valid(ShapelyPolygon(p)) for p in original_vias]
+  tree = STRtree(originals)
+  fill_factors = []
+  covered_total = 0.0
+  for piece_pts in pieces:
+    piece = make_valid(ShapelyPolygon(piece_pts))  # gdspy keyhole rings can be invalid
+    if piece.area <= 1e-9:
+      fill_factors.append(1.0)
+      continue
+    nearby = [originals[i] for i in tree.query(piece, predicate='intersects')]
+    if not nearby:
+      # not a merge result (e.g. added by script after reading GDSII): solid via, not empty
+      fill_factors.append(1.0)
+      continue
+    covered = unary_union(nearby).intersection(piece).area
+    covered_total += covered
+    fill_factors.append(min(1.0, covered / piece.area))
+
+  via_area = unary_union(originals).area
+  return fill_factors, (covered_total / via_area if via_area > 0 else 1.0)
+
+
 
 # ----------- read GDSII file, return openEMS polygon list object -----------
 
@@ -594,6 +656,8 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
             metal = metals_list.getbylayernumber(layer_to_extract) # this is the layer number with offset, to match XML stackup
             if metal != None:
               if (merge_polygon_size>0) and metal.is_via:
+                # keep the unmerged vias, for the optional fill factor correction in simulation setup
+                all_polygons.via_originals.setdefault(layer + layernumber_offset, []).extend(layerpolygons)
                 layerpolygons = merge_via_array (layerpolygons, merge_polygon_size)
 
             # cache raw polygons for this layer, so derived layers can use it as an operand
