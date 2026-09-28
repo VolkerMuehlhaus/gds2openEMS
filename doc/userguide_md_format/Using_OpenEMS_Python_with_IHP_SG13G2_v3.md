@@ -208,7 +208,7 @@ The GSG port on each end of the line consists of 2 port definitions each, with o
 
 ### Meshing
 
-The default in all examples is **automatic meshing based on geometry**: mesh lines are placed to follow polygon edges and diagonal features. Lines that end up too close together are then merged or removed, since they would slow simulation without adding accuracy. `settings['refined_cellsize']` sets the target mesh resolution at conductor edges. `settings['cells_per_wavelength']` and `settings['meshsize_max']` bound the coarse mesh size elsewhere in the model.
+The default in all examples is **automatic meshing based on geometry**: mesh lines are placed to follow polygon edges and diagonal features. Lines that end up too close together are then merged or removed, since they would slow simulation without adding accuracy. `settings['refined_cellsize']` sets the target mesh resolution at conductor edges. `settings['cells_per_wavelength']` sets the coarse mesh size elsewhere in the model: the maximum cell size is the wavelength at `fstop` in the densest dielectric, divided by `cells_per_wavelength`.
 
 ![Automatic meshing](./images/meshing_example.png)
 
@@ -268,6 +268,8 @@ python your_model.py       # generates the model, runs the simulation, writes th
 
 ## The settings{} dictionary in detail
 
+Settings keys are case-insensitive: `settings['numthreads']` works like `settings['numThreads']`, and `setupSimulation()` prints a note when it uses a key in a different case. If both spellings are set with different values, the spelling shown in the tables below wins, with a warning.
+
 ### Required settings
 
 | Key | Meaning |
@@ -279,6 +281,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 | `settings['refined_cellsize']` | Target mesh size at conductor edges |
 | `settings['Boundaries']` | Required, no built-in default. List of 6 boundary conditions, one per side (`xmin, xmax, ymin, ymax, zmin, zmax`): `'PEC'` (lossless metal box), `'PMC'` (magnetic wall, useful for symmetry), `'MUR'` (simple absorbing), or `'PML_8'` (higher-quality absorbing, much slower simulation) |
 | `settings['energy_limit']` | Residual energy (dB) at which the FDTD time-domain solve is considered converged |
+| `settings['cells_per_wavelength']` | Coarse-mesh resolution away from refined edges, 10 or more (the examples use 10-20). The maximum cell size is calculated from it as wavelength at `fstop` / (√εr,max · `cells_per_wavelength`). Alternatively, leave out `cells_per_wavelength` and set `settings['max_cellsize']` directly, in the geometry unit |
 
 ### Optional settings
 
@@ -287,8 +290,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 | `settings['preview_only']` | `False` | Show the AppCSXCAD preview and stop, without simulating |
 | `settings['no_gui']` | `False` | Never show AppCSXCAD; always proceed straight to simulation once the model changed (see [the hash-based skip](#re-running-a-model-the-hash-based-skip)) |
 | `settings['force_simulation']` | `False` | Re-simulate even if the model hash matches a previous run |
-| `settings['cells_per_wavelength']` | 10-20 depending on example | Coarse-mesh resolution away from refined edges; must be 10 or more |
-| `settings['meshsize_max']` | model-dependent | Absolute cap on coarse mesh cell size |
+| `settings['max_cellsize']` | calculated | Maximum mesh cell size in the geometry unit. Only used when `fstop`, `unit` or `cells_per_wavelength` is missing; otherwise the value calculated from `cells_per_wavelength` is used |
 | `settings['preprocess_gds']` | `False` | Legacy, now a no-op — see [Input files](#input-files) |
 | `settings['merge_polygon_size']` | `0` | Merge via-array polygons within this distance — see [Input files](#input-files) |
 | `settings['fill_factor_correction']` | `False` | Scale the conductivity of merged via arrays by their via fill factor — see [Input files](#input-files) |
@@ -299,7 +301,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 
 ## Simulation volume and boundaries
 
-The simulation volume is the GDSII geometry bounding box, oversized by `margin` on all sides. If `air_around` is set, that adds further oversize. The volume is then meshed into cells according to `refined_cellsize`/`cells_per_wavelength`/`meshsize_max`.
+The simulation volume is the GDSII geometry bounding box, oversized by `margin` on all sides. If `air_around` is set, that adds further oversize. The volume is then meshed into cells according to `refined_cellsize` and `cells_per_wavelength`.
 
 ![Margin defined in simulation settings](./images/simulation_margin.png)
 

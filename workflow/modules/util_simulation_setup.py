@@ -42,6 +42,7 @@ from openEMS import openEMS
 from openEMS.physical_constants import *
 
 import numpy as np
+from collections.abc import MutableMapping
 
 try:
     import shapely.geometry
@@ -758,6 +759,59 @@ def addFielddumps_to_CSX (FDTD, CSX, all_field_dumps, allpolygons, metals_list):
             Dump.AddBox([xmin,ymin,zmin], [xmax,ymax,zmax])
     
 
+class CaseInsensitiveSettings (MutableMapping):
+    # view on the user's settings dict with case-insensitive key lookup: settings['numthreads']
+    # is found when the code asks for settings['numThreads']. Writes go to the user's dict, under the
+    # spelling already used there. If a key is set in several spellings, the exact spelling wins.
+    _reported = set()
+
+    def __init__ (self, settings):
+        self.settings = settings.settings if isinstance(settings, CaseInsensitiveSettings) else settings
+
+    def _find (self, key):
+        if not isinstance(key, str):
+            return key
+        matches = [k for k in self.settings if isinstance(k, str) and k.lower() == key.lower()]
+        if not matches:
+            return key
+        found = key if key in matches else matches[0]
+        others = [k for k in matches if k != found]
+        report = (key, tuple(matches))
+        if report not in CaseInsensitiveSettings._reported:
+            CaseInsensitiveSettings._reported.add(report)
+            if found != key:
+                print(f"Note: settings['{found}'] is used as settings['{key}']")
+            for other in others:
+                try:
+                    differ = bool(self.settings[other] != self.settings[found])
+                except Exception:
+                    differ = self.settings[other] is not self.settings[found]
+                if differ:
+                    print(f"WARNING: settings['{found}'] and settings['{other}'] are both set, with different values. "
+                          f"Using settings['{found}'] = {self.settings[found]!r}")
+        return found
+
+    def __getitem__ (self, key):
+        return self.settings[self._find(key)]
+
+    def __setitem__ (self, key, value):
+        self.settings[self._find(key)] = value
+
+    def __delitem__ (self, key):
+        del self.settings[self._find(key)]
+
+    def __iter__ (self):
+        return iter(self.settings)
+
+    def __len__ (self):
+        return len(self.settings)
+
+
+def _case_insensitive (settings):
+    # settings[] keys are case-insensitive, see CaseInsensitiveSettings
+    return None if settings is None else CaseInsensitiveSettings(settings)
+
+
 def setupSimulation (excite_portnumbers=None,
                      simulation_ports=None, 
                      FDTD=None, 
@@ -783,6 +837,8 @@ def setupSimulation (excite_portnumbers=None,
     # This function can be called in two ways: 
     # 1) by all those positional parameters or 
     # 2) by passing just FDTD and settings dictionary, where everything is inside the settings dict
+
+    settings = _case_insensitive(settings)
 
     if dielectrics_list is None:
         if settings is not None:
@@ -909,6 +965,8 @@ def runSimulation (excite_portnumbers=None,
     # 1) by all those positional parameters or 
     # 2) by passing just FDTD and settings dictionary, where everything is inside the settings dict
 
+    settings = _case_insensitive(settings)
+
     if excite_portnumbers is None:
         if settings is not None:
             print('Getting simulation settings from "settings" dictionary')
@@ -1030,6 +1088,8 @@ def runSimulation (excite_portnumbers=None,
 
 def runOpenEMS (excite_ports, settings):
     # This is the all-in-one simulation function that creates openEMS model and runs all ports, on eafter another
+
+    settings = _case_insensitive(settings)
 
     # get settings from simulation model
     preview_only = settings.get('preview_only', False)
