@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 28-Sep-2026
+
+`setupSimulation()` now warns when a field dump's `source_layernum` has no polygons. The dump box then silently covered the bounding box of the entire layout, which happens when the dump layer was not passed to `read_gds()`. The fix is to add `layernumbers.extend(field_dumps.dumplayers)` before `read_gds()`; the [Field dumps](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#field-dumps) section now says so.
+
 ## 27-Sep-2026
 
 New option `settings['fill_factor_correction']` (default `False`), ported from gds2palace: with via array merging (`merge_polygon_size > 0`), the conductivity of each merged via polygon is multiplied by its via fill factor (original via area / merged area, rounded to 2 decimals), because the stackup via conductivity is derived from the per-via resistance. Scaled vias get their own material, e.g. `TopVia2_x0.49`. See [Input files](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#input-files). With the option off, the generated model is unchanged.

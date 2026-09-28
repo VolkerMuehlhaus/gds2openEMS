@@ -324,7 +324,7 @@ field_dumps.add_time_dump(name='Et',
 settings['field_dumps'] = field_dumps
 ```
 
-Each dump is positioned by its own GDSII bounding-box layer (like a port), with `dump_type` one of `'E'`, `'H'`, `'J'`, `'rotH'`, written as `'vtk'` or `'hdf5'`. A frequency dump captures the steady-state field at one frequency; a time dump captures the field evolving during the FDTD solve. See `workflow/run_line_viaport_fielddump.py` for a complete example.
+Each dump is positioned by its own GDSII bounding-box layer (like a port), with `dump_type` one of `'E'`, `'H'`, `'J'`, `'rotH'`, written as `'vtk'` or `'hdf5'`. That layer must be read from the GDSII file, like the port layers: add `layernumbers.extend(field_dumps.dumplayers)` before `read_gds()`. Otherwise the dump silently covers the bounding box of the entire layout, and `setupSimulation()` prints a warning. The dump box is the bounding rectangle of all polygons on that layer. Its edges also become mesh lines, like any other polygon edge. A frequency dump captures the steady-state field at one frequency; a time dump captures the field evolving during the FDTD solve. See `workflow/run_line_viaport_fielddump.py` for a complete example.
 
 ## Antenna simulation
 

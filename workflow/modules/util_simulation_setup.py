@@ -747,6 +747,11 @@ def addFielddumps_to_CSX (FDTD, CSX, all_field_dumps, allpolygons, metals_list):
                                      sub_sampling=field_dump.subsampling)
 
             # add dump box
+            if allpolygons.bounding_box.bounding_boxes.get(field_dump.source_layernum) is None:
+                # get_layer_bounding_box() falls back to the global bounding box for a layer without polygons
+                print(f"WARNING: no polygons on layer {field_dump.source_layernum} for field dump '{field_dump.name}', "
+                      f"dump box uses the bounding box of the entire layout instead. "
+                      f"Add layernumbers.extend(field_dumps.dumplayers) before read_gds().")
             xmin, xmax, ymin, ymax  = allpolygons.get_layer_bounding_box(field_dump.source_layernum)
             zmin = metals_list.getbylayername(field_dump.from_layername).zmin + field_dump.offset_bottom
             zmax = metals_list.getbylayername(field_dump.to_layername).zmax + field_dump.offset_top
