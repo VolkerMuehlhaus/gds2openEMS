@@ -54,7 +54,7 @@ settings['fill_factor_correction'] = True
 
 settings['preprocess_gds'] = False # preprocessing is no longer required
 
-for cellsize in [2]:
+for cellsize in [1,2]:
     for energylimit in [-60]:
 
         # automated sweep, do not show AppCSXCAD model preview
@@ -120,8 +120,19 @@ for cellsize in [2]:
         # supported dump_type = 'E','H','J','rotH'
         # supported file_type = 'vtk', 'hdf5'
         # z-position is zmax of from_layername, zmin of to_layername
+
         field_dumps = simulation_setup.all_field_dumps()
-        field_dumps.add_frequency_dump(name='Ef', frequency=10e9, file_type='vtk', dump_type='E', source_layernum=302, from_layername='TopMetal1', to_layername='TopMetal2', offset_top=0, offset_bottom=0)
+        fielddump_boundary_layer = 302 # Fall back to complete drawing if that polygon is missing in the gds file
+        layernumbers.append(fielddump_boundary_layer)
+        field_dumps.add_frequency_dump(name='Ef', 
+                                       frequency=10e9, 
+                                       file_type='vtk', 
+                                       dump_type='E', 
+                                       source_layernum=fielddump_boundary_layer, 
+                                       from_layername='TopMetal1', 
+                                       to_layername='TopMetal2', 
+                                       offset_top=0, 
+                                       offset_bottom=0)
         settings['field_dumps'] = field_dumps
 
         # ======================== simulation ================================

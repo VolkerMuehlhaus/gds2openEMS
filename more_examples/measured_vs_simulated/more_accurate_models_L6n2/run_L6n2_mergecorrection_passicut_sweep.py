@@ -54,7 +54,7 @@ settings['fill_factor_correction'] = True
 
 settings['preprocess_gds'] = False # preprocessing is no longer required
 
-for cellsize in [1, 2]:
+for cellsize in [0.5, 1, 2]:
     for energylimit in [-40,-50,-60]:
 
         # automated sweep, do not show AppCSXCAD model preview
