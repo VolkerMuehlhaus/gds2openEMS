@@ -155,6 +155,8 @@ allpolygons = gds_reader.read_gds(gds_filename, layernumbers, purposelist=[0],
 
 `merge_polygon_size` applies to layers declared `Type="via"` in the XML stackup. With a non-zero value, polygons on that layer are oversized by half that distance, overlapping ones are merged, then undersized back — merging a via array into one bounding-box shape, as long as the maximum via spacing doesn't exceed the given value.
 
+Merging fills the gaps between the vias with via material, so the merged block conducts better than the real via array. The via conductivity in the SG13G2 stackup files is derived from the per-via resistance in the process specification, i.e. it is valid for the via cross section only. With `settings['fill_factor_correction'] = True`, `setupSimulation()` corrects this: each merged via polygon gets its conductivity multiplied by its fill factor, the original via area inside it divided by the merged area (rounded to 2 decimals). Polygons with different fill factors get separate materials, named like `TopVia2_x0.49`, which you can see in AppCSXCAD; single vias that were not merged keep fill factor 1 and the original material. The correction needs `merge_polygon_size > 0`, because the fill factor is calculated from the via polygons before merging: a GDSII file where via arrays were already merged into blocks (e.g. by `gds_prepare_for_EM`) gets no correction. PEC via layers are not scaled.
+
 ### Port definitions
 
 Ports are created from polygons on special GDSII layers (by convention, layer 201 and above), not by coding their position directly in Python:
@@ -206,9 +208,18 @@ The GSG port on each end of the line consists of 2 port definitions each, with o
 
 ### Meshing
 
-The default in all examples is **automatic meshing based on geometry**: mesh lines are placed to follow polygon edges and diagonal features. Lines that end up too close together are then merged or removed, since they would slow simulation without adding accuracy. `settings['refined_cellsize']` sets the target mesh resolution at conductor edges. `settings['cells_per_wavelength']` and `settings['meshsize_max']` bound the coarse mesh size elsewhere in the model.
+The default in all examples is **automatic meshing based on geometry**: mesh lines are placed to follow polygon edges and diagonal features. Lines that end up too close together are then merged or removed, since they would slow simulation without adding accuracy. `settings['refined_cellsize']` sets the target mesh resolution at conductor edges. `settings['cells_per_wavelength']` sets the coarse mesh size elsewhere in the model: the maximum cell size is the wavelength at `fstop` in the densest dielectric, divided by `cells_per_wavelength`.
 
 ![Automatic meshing](./images/meshing_example.png)
+
+In z direction, mesh lines come from the stackup. Every dielectric boundary and the bottom and top of every metal and via layer used in the layout get a mesh line, and lines closer than 1 nm are merged into one. Metals are then subdivided:
+
+- a metal up to 3× `refined_cellsize` thick is divided into cells of about `refined_cellsize`, split at any dielectric interface inside it (e.g. a passivation that cuts TopMetal2 halfway), so no subdivision line lands next to such an interface;
+- a thicker metal gets one extra line at `refined_cellsize` from its bottom and top surface.
+
+Dielectrics are graded between these lines, up to the maximum cell size. So the smallest z cell is set by the thinnest layer actually used, not by the meshing rules.
+
+Before 28-Sep-2026, the z mesh placed metal subdivision lines without regard to interfaces inside the metal, which created very small cells in some stackups (0.1 µm in the L6n2 passivation-cut stackup at 1 µm `refined_cellsize`). To reproduce results from that version, set `settings['z_mesh_function'] = util_meshlines.create_z_mesh_legacy`.
 
 The default meshing method described above is reliable and easy to work with, and is a good choice for most models. The optional example `more_examples/easyMesh/` demonstrates an alternative meshing engine, shown for information — in most cases the two approaches are equivalent, and neither is a general replacement for the other. See chapter [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems).
 
@@ -257,6 +268,8 @@ python your_model.py       # generates the model, runs the simulation, writes th
 
 ## The settings{} dictionary in detail
 
+Settings keys are case-insensitive: `settings['numthreads']` works like `settings['numThreads']`, and `setupSimulation()` prints a note when it uses a key in a different case. If both spellings are set with different values, the spelling shown in the tables below wins, with a warning.
+
 ### Required settings
 
 | Key | Meaning |
@@ -268,6 +281,7 @@ python your_model.py       # generates the model, runs the simulation, writes th
 | `settings['refined_cellsize']` | Target mesh size at conductor edges |
 | `settings['Boundaries']` | Required, no built-in default. List of 6 boundary conditions, one per side (`xmin, xmax, ymin, ymax, zmin, zmax`): `'PEC'` (lossless metal box), `'PMC'` (magnetic wall, useful for symmetry), `'MUR'` (simple absorbing), or `'PML_8'` (higher-quality absorbing, much slower simulation) |
 | `settings['energy_limit']` | Residual energy (dB) at which the FDTD time-domain solve is considered converged |
+| `settings['cells_per_wavelength']` | Coarse-mesh resolution away from refined edges, 10 or more (the examples use 10-20). The maximum cell size is calculated from it as wavelength at `fstop` / (√εr,max · `cells_per_wavelength`). Alternatively, leave out `cells_per_wavelength` and set `settings['max_cellsize']` directly, in the geometry unit |
 
 ### Optional settings
 
@@ -276,18 +290,18 @@ python your_model.py       # generates the model, runs the simulation, writes th
 | `settings['preview_only']` | `False` | Show the AppCSXCAD preview and stop, without simulating |
 | `settings['no_gui']` | `False` | Never show AppCSXCAD; always proceed straight to simulation once the model changed (see [the hash-based skip](#re-running-a-model-the-hash-based-skip)) |
 | `settings['force_simulation']` | `False` | Re-simulate even if the model hash matches a previous run |
-| `settings['cells_per_wavelength']` | 10-20 depending on example | Coarse-mesh resolution away from refined edges; must be 10 or more |
-| `settings['meshsize_max']` | model-dependent | Absolute cap on coarse mesh cell size |
+| `settings['max_cellsize']` | calculated | Maximum mesh cell size in the geometry unit. Only used when `fstop`, `unit` or `cells_per_wavelength` is missing; otherwise the value calculated from `cells_per_wavelength` is used |
 | `settings['preprocess_gds']` | `False` | Legacy, now a no-op — see [Input files](#input-files) |
 | `settings['merge_polygon_size']` | `0` | Merge via-array polygons within this distance — see [Input files](#input-files) |
-| `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list |
+| `settings['fill_factor_correction']` | `False` | Scale the conductivity of merged via arrays by their via fill factor — see [Input files](#input-files) |
+| `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` |
 | `settings['numThreads']` | automatic | Force the openEMS solver thread count — see [Forcing the solver thread count](#forcing-the-solver-thread-count) |
 | `settings['easyMesh']` | `False` | Use the easyMesh4openEMS automatic mesh generator instead of the built-in one — see [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems) |
 | `settings['field_dumps']` | none | A `simulation_setup.all_field_dumps()` object — see [Field dumps](#field-dumps) |
 
 ## Simulation volume and boundaries
 
-The simulation volume is the GDSII geometry bounding box, oversized by `margin` on all sides. If `air_around` is set, that adds further oversize. The volume is then meshed into cells according to `refined_cellsize`/`cells_per_wavelength`/`meshsize_max`.
+The simulation volume is the GDSII geometry bounding box, oversized by `margin` on all sides. If `air_around` is set, that adds further oversize. The volume is then meshed into cells according to `refined_cellsize` and `cells_per_wavelength`.
 
 ![Margin defined in simulation settings](./images/simulation_margin.png)
 
@@ -321,7 +335,7 @@ field_dumps.add_time_dump(name='Et',
 settings['field_dumps'] = field_dumps
 ```
 
-Each dump is positioned by its own GDSII bounding-box layer (like a port), with `dump_type` one of `'E'`, `'H'`, `'J'`, `'rotH'`, written as `'vtk'` or `'hdf5'`. A frequency dump captures the steady-state field at one frequency; a time dump captures the field evolving during the FDTD solve. See `workflow/run_line_viaport_fielddump.py` for a complete example.
+Each dump is positioned by its own GDSII bounding-box layer (like a port), with `dump_type` one of `'E'`, `'H'`, `'J'`, `'rotH'`, written as `'vtk'` or `'hdf5'`. That layer must be read from the GDSII file, like the port layers: add `layernumbers.extend(field_dumps.dumplayers)` before `read_gds()`. Otherwise the dump silently covers the bounding box of the entire layout, and `setupSimulation()` prints a warning. The dump box is the bounding rectangle of all polygons on that layer. Its edges also become mesh lines, like any other polygon edge. A frequency dump captures the steady-state field at one frequency; a time dump captures the field evolving during the FDTD solve. See `workflow/run_line_viaport_fielddump.py` for a complete example.
 
 ## Antenna simulation
 

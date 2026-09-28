@@ -2,6 +2,29 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 28-Sep-2026
+
+New study [L6n2 inductor with openEMS vs. measurement](../more_examples/measured_vs_simulated/more_accurate_models_L6n2/README.md): step by step from the default model to a result within 3% of the measured low-frequency resistance and 0.1% of the measured SRF, with via fill factor correction, the energy end criterion (use −60 dB, or at least −50 dB, for low-frequency R), a passivation cut stackup, and a comparison with gds2palace.
+
+Rewrote the z mesher `util_meshlines.create_z_mesh()`. Metal subdivision lines now respect dielectric interfaces inside a metal, and z lines closer than 1 nm are merged. The old code created unnecessarily small cells in some cases: 0.1 µm instead of 0.4 µm for the [L6n2](../more_examples/measured_vs_simulated/more_accurate_models_L6n2/README.md) passivation-cut stackup at 0.8–1.4 µm `refined_cellsize`, and sub-picometer cells from floating point noise in `Reference=` stackups with the MIM layer. Both force a very small FDTD time step. For standard stackups, the z mesh is unchanged. A scan over all example stackups and `refined_cellsize` 0.3–3 µm changed only the cases with these artifacts. The previous function is still available as `create_z_mesh_legacy`, see [Meshing](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#meshing).
+
+`settings['air_around']` as a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` now works, as the user guide already stated. Previously the mesh functions only accepted a single value and failed on a list.
+
+`setupSimulation()` now warns when a field dump's `source_layernum` has no polygons. The dump box then silently covered the bounding box of the entire layout, which happens when the dump layer was not passed to `read_gds()`. The fix is to add `layernumbers.extend(field_dumps.dumplayers)` before `read_gds()`; the [Field dumps](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#field-dumps) section now says so.
+
+`settings[]` keys are now case-insensitive, e.g. `settings['numthreads']` works like `settings['numThreads']`. Previously a key in the wrong case was silently ignored and the default used. `setupSimulation()` prints a note for each key used in a different case, and a warning if both spellings are set with different values; the canonical spelling wins.
+
+
+## 27-Sep-2026
+
+New option `settings['fill_factor_correction']` (default `False`), ported from gds2palace: with via array merging (`merge_polygon_size > 0`), the conductivity of each merged via polygon is multiplied by its via fill factor (original via area / merged area, rounded to 2 decimals), because the stackup via conductivity is derived from the per-via resistance. Scaled vias get their own material, e.g. `TopVia2_x0.49`. See [Input files](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#input-files). With the option off, the generated model is unchanged.
+
+Stackup Editor (`stackup_editor/`), ported from setupEM:
+
+- **Stackup Preview**: metals that extend past the dielectric boundary above are drawn up to their true height, and the distance to that boundary shows as a negative value in red instead of 0. A dielectric fill layer anchored to a metal (`Reference=`, e.g. conformal passivation) is drawn at its real position, straddling the boundaries it crosses, in its own amber color; one that overlaps another conductor is flagged in orange.
+- Saving a stackup without a file extension appends `.xml`.
+- The editor pins a light color scheme, so it stays readable on Windows accounts with dark mode enabled.
+
 ## 22-Sep-2026
 
 The [hash-based skip](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#re-running-a-model-the-hash-based-skip) in `runSimulation()` now also hashes the calling model script itself (up to and including the `runSimulation()` call), not just the generated CSX file. This catches changes to solver-runtime settings like `numThreads` or `EndCriteria` that never end up in the CSX file and were previously missed, causing stale results to be silently reused. Code after the call (post-processing, plotting, ...) is still excluded from the hash, so editing that still doesn't force a re-solve. Existing `simulation_model.hash` files from before this change will mismatch once, forcing one re-simulation per cached result.
