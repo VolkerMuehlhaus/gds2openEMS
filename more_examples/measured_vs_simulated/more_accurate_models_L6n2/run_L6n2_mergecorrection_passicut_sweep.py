@@ -41,7 +41,7 @@ import numpy as np
 settings = {}
 
 settings['preview_only'] = False  # preview model/mesh only?
-settings['numthreads'] = 0 # run on xx cores, changes to 0 for automatic detection by openEMS
+settings['numThreads'] = 0 # run on xx cores, changes to 0 for automatic detection by openEMS
 
 # ===================== input files and path settings =======================
 

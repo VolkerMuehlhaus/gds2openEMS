@@ -28,6 +28,7 @@ def run(name, label):
 
 MEAS = (os.path.join(study_dir, "meas_L5_6n2_THRU_deemb.S2P"), "Measured (de-embedded)")
 MESH1 = run("run_L6n2_mesh1", "Sim: via merge, no correction, 1 µm mesh")
+E40_0U5_CORR = run("run_L6n2_mergecorrection_mesh0u5", "Sim: via merge + correction, 0.5 µm mesh")
 E40 = run("run_L6n2_mergecorrection_sweep_mesh1_limit-40", "Sim: end criterion -40 dB")
 E40_2UM = run("run_L6n2_mergecorrection_sweep_mesh2_limit-40", "Sim: via merge + correction, 2 µm mesh")
 E40_CORR = run("run_L6n2_mergecorrection_sweep_mesh1_limit-40", "Sim: via merge + correction, 1 µm mesh")
@@ -41,7 +42,7 @@ PALACE_REC = run("palace_L6n2_with_ports_2um_passi3D", "Palace: conformal passiv
 
 PLOTS = {
     "step1_via_merge_correction.png": [MEAS, MESH1, E40_CORR],
-    "step2_mesh.png": [MEAS, E40_2UM, E40_CORR],
+    "step2_mesh.png": [MEAS, E40_2UM, E40_CORR, E40_0U5_CORR],
     "step3_energy_limit.png": [MEAS, E40, E50, E60],
     "step4_passicut_2um.png": [MEAS, PLANAR_2UM, PASSICUT_2UM],
     "step4_passicut_1um.png": [MEAS, PASSICUT_2UM, PASSICUT_1UM],
