@@ -56,8 +56,14 @@
 #              conductor/via/sheet layers without any matching <Materials> entry; see
 #              addGeometry_to_CSX() in util_simulation_setup.py for where the reserved name is
 #              resolved into a literal ideal-conductor CSX.AddMetal(...) construct
+# 18 Sep 2026: added dielectric_layers_list.find_missing_chiplet_boundaries()/
+#              find_missing_chiplet_boundary_warnings(): once a stackup branches into
+#              multiple chiplets, an explicit Boundary= is needed on both the shared branch
+#              point and each chiplet's own root Dielectric - unlike a single-chiplet stackup,
+#              there's no longer a single "whole GDS extent" fallback that means anything for
+#              either side of the branch
 
-__version__ = "1.8.0"
+__version__ = "1.9.4"
 
 import os
 import math
@@ -786,7 +792,8 @@ class dielectric_layers_list:
     """Initialize empty list
     """
     self.dielectrics = []      # list with dielectric objects
-    
+    self.chiplet_groups = None  # set by detect_chiplet_groups(), via parse_substrate()
+
   def append (self, dielectric, materials_list ):
     """Append one dielectric to the list
 
@@ -896,7 +903,7 @@ class dielectric_layers_list:
     return boundary_layer_list
   
 
-  def register_metals_inside (self, metals_list):
+  def register_metals_inside (self, metals_list, groups=None):
     """iterates over dielectrics and metals, sets metals_inside property for each dielectric
        with the list of metals that originate inside it - i.e. whichever single dielectric's
        [zmin, zmax) range contains the metal's own zmin, regardless of where its zmax ends
@@ -918,16 +925,287 @@ class dielectric_layers_list:
        stackup dimension in this schema (micron-scale), so it only ever affects true
        boundary coincidences, never a metal that's genuinely, non-trivially inside a
        dielectric.
+
+       Matching is tried in three tiers per metal, falling through only when a tier finds
+       nothing:
+         1. a dielectric in the metal's own scope (same chiplet, or both interposer) whose
+            range genuinely contains it (the exclusive-zmax test above).
+         2. failing that, a dielectric in the metal's own scope whose zmax exactly coincides
+            with the metal's zmin (within _BOUNDARY_EPSILON) - the ordinary
+            Reference="..." ReferenceEdge="Top" Zmin="0" pattern places a metal exactly on
+            top of its reference dielectric, which tier 1 deliberately excludes (see above);
+            without this tier, such a metal has nothing in its own scope to register into and
+            falls through to tier 3, where a *broader* dielectric that also happens to span
+            that z (typically a shared interposer AIR region sitting above every chiplet)
+            claims it instead - harmless in a single-chiplet file (there's only one such
+            dielectric, and it's the visually correct place to draw the metal), but wrong in
+            a multi-chiplet one: a shared/interposer dielectric is drawn in every chiplet's
+            view, so a metal that chiplet-scoping otherwise correctly attributes to one
+            chiplet would visibly appear in every sibling chiplet's view too.
+         3. the original, unscoped fallback: any dielectric whose scope is merely *compatible*
+            (see _same_chiplet_scope()) and whose range contains the metal. This is also the
+            only tier reachable at all when groups=None, since every dielectric/metal then
+            maps to the same (None) group - tiers 1-2 already cover that case exactly as
+            before with no behavior change.
+
+       groups (chiplet_groups, optional): if given, tiers 1-2 prefer keeping a metal inside
+       its own chiplet's dielectrics before falling back to a merely scope-compatible one -
+       see _same_chiplet_scope(). None (the default) preserves the original unscoped behavior
+       exactly (tier 1 alone covers every dielectric, same as before).
     Args:
         metals_list (metal_layers_list): metals read from stackup
+        groups (chiplet_groups, optional): chiplet grouping from detect_chiplet_groups()
     """
     _BOUNDARY_EPSILON = 1e-6
+    dielectric_group_id = _group_id_map(groups, "dielectrics") if groups is not None else {}
+    metal_group_id = _group_id_map(groups, "layers") if groups is not None else {}
+
     for dielectric in self.dielectrics:
-      enclosed = []
-      for metal in metals_list.metals:
-        if (metal.zmin >= dielectric.zmin - _BOUNDARY_EPSILON) and (metal.zmin < dielectric.zmax - _BOUNDARY_EPSILON):
-          enclosed.append(metal)
-      dielectric.metals_inside = enclosed
+      dielectric.metals_inside = []
+
+    for metal in metals_list.metals:
+      mgroup = metal_group_id.get(metal)
+
+      own_containing = [d for d in self.dielectrics
+                         if dielectric_group_id.get(d) == mgroup
+                         and metal.zmin >= d.zmin - _BOUNDARY_EPSILON
+                         and metal.zmin < d.zmax - _BOUNDARY_EPSILON]
+      if own_containing:
+        candidates = own_containing
+      else:
+        own_boundary = [d for d in self.dielectrics
+                         if dielectric_group_id.get(d) == mgroup
+                         and abs(metal.zmin - d.zmax) < _BOUNDARY_EPSILON]
+        if own_boundary:
+          candidates = own_boundary
+        else:
+          candidates = [d for d in self.dielectrics
+                        if _same_chiplet_scope(dielectric_group_id.get(d), mgroup)
+                        and metal.zmin >= d.zmin - _BOUNDARY_EPSILON
+                        and metal.zmin < d.zmax - _BOUNDARY_EPSILON]
+
+      for dielectric in candidates:
+        dielectric.metals_inside.append(metal)
+
+
+  _Z_OVERLAP_EPSILON = 1e-6  # same magnitude/reasoning as register_metals_inside()'s _BOUNDARY_EPSILON
+
+  def find_z_overlap_pairs (self):
+    """Returns (dielectric_a, dielectric_b) pairs, both in the exact same scope (both
+       interposer, or both the identical chiplet), whose resolved z-ranges genuinely
+       overlap. Deliberately uses exact scope equality here, not _same_chiplet_scope()'s
+       "compatible" notion: an interposer dielectric (e.g. a filler/AIR region spanning the
+       whole domain) is *expected* to overlap every chiplet's own dielectrics - that's the
+       normal, intentional relationship between the shared base and each chiplet's carve-out,
+       not an error - so interposer-vs-chiplet pairs must be excluded here just as much as
+       chiplet-vs-different-chiplet pairs. Only two dielectrics that are both meant to
+       describe the *same* single column (both interposer, or both the same chiplet's own
+       subtree) can never legitimately overlap. Call only after chiplet_groups has been set
+       (i.e. after detect_chiplet_groups() has run). Backs both find_z_overlaps() (text
+       warnings) and the Stackup Preview's per-slab overlap outline
+       (compute_stackup_layout()/InteractiveRegionItem in editor_common.py).
+    """
+    group_id = _group_id_map(self.chiplet_groups, "dielectrics") if self.chiplet_groups is not None else {}
+    pairs = []
+    for i, a in enumerate(self.dielectrics):
+      for b in self.dielectrics[i + 1:]:
+        if group_id.get(a) != group_id.get(b):
+          continue
+        overlap = min(a.zmax, b.zmax) - max(a.zmin, b.zmin)
+        if overlap > self._Z_OVERLAP_EPSILON:
+          pairs.append((a, b))
+    return pairs
+
+
+  def find_z_overlaps (self):
+    """Human-readable warning strings, one per pair from find_z_overlap_pairs().
+    Returns:
+        list of str: one warning per overlapping dielectric pair, empty if none
+    """
+    return [f"Dielectric '{a.name}' (z={a.zmin:.4f}..{a.zmax:.4f}) overlaps "
+            f"'{b.name}' (z={b.zmin:.4f}..{b.zmax:.4f})"
+            for a, b in self.find_z_overlap_pairs()]
+
+
+  def find_missing_chiplet_boundaries (self):
+    """Returns the dielectric_layer objects that need a Boundary= GDS layer number but don't
+       have one: each detected chiplet's branch point (the shared interposer Dielectric it
+       references) and each chiplet's own root Dielectric (the one with
+       Reference=<branch_point.name>). In a single-chiplet/non-chiplet stackup, Boundary is
+       genuinely optional (the GDSII reader can fall back to the whole GDS extent), but once a
+       stackup branches into multiple chiplets sharing one interposer, an explicit Boundary is
+       needed on both sides of the branch to know which polygons belong to the shared base and
+       which belong to each chiplet - there's no longer a single "whole GDS extent" that means
+       anything. A branch point referenced by 2+ chiplets is only checked once (same underlying
+       Dielectric object). Call only after chiplet_groups has been set (i.e. after
+       detect_chiplet_groups() has run).
+    Returns:
+        list of dielectric_layer: branch points/chiplet roots missing Boundary=, empty if none
+        or if this stackup has no detected chiplets
+    """
+    if self.chiplet_groups is None:
+      return []
+    missing = []
+    seen_branch_points = set()
+    for group in self.chiplet_groups.chiplets:
+      branch_point = group.branch_point
+      if id(branch_point) not in seen_branch_points:
+        seen_branch_points.add(id(branch_point))
+        if branch_point.gdsboundary is None:
+          missing.append(branch_point)
+      if group.root.gdsboundary is None:
+        missing.append(group.root)
+    return missing
+
+
+  def find_missing_chiplet_boundary_warnings (self):
+    """Human-readable warning strings, one per element from find_missing_chiplet_boundaries().
+    Returns:
+        list of str: one warning per Dielectric missing a required Boundary=, empty if none
+    """
+    return [f"Dielectric '{d.name}' has no Boundary= layer number - required once a stackup "
+            f"branches into chiplets, to compute the correct bounding box for each region"
+            for d in self.find_missing_chiplet_boundaries()]
+
+
+  def detect_chiplet_groups (self, metals_list):
+    """Detect a multi-chiplet stackup purely from the Reference graph: a "branch point" is
+       any Dielectric that is the Reference target of 2 or more other Dielectrics - each such
+       referencing Dielectric is treated as the root of one chiplet's subtree (everything
+       transitively reached by following Reference chains forward from that root, plus any
+       Layer whose own Reference chain resolves back into that subtree). Everything NOT in
+       any chiplet subtree is "interposer" - the shared base, always shown/always in scope.
+
+       This is read-only bookkeeping over already-resolved data (called after
+       resolve_references() on both dielectrics and metals) - it does not change parsing or
+       resolution itself. Added for setupEM/setupThermal's chiplet-aware Stackup Preview
+       (VectorWidget/compute_stackup_layout() in setup_common.py) - this openEMS copy has the
+       analogous editor_common.py/stackupEditor.py.
+
+       No new XML syntax: a Dielectric/Layer with no Reference at all is unambiguously
+       interposer (it's the legacy implicit-stacking anchor, or an absolute-position element -
+       either way there's nothing to resolve, so it can't be part of a chiplet subtree). A
+       Layer referencing an interposer Dielectric directly resolves to "interposer" (None)
+       with no special-casing needed - only a Layer whose Reference chain actually leads back
+       to a chiplet root ends up assigned to that chiplet.
+
+       A file with no branch points at all (the common, non-chiplet case) returns the "no
+       chiplets" shape immediately: interposer_dielectrics/interposer_layers = everything,
+       chiplets = [] - this is what makes every consumer of chiplet_groups degrade to exactly
+       today's unscoped behavior on an ordinary file (see _same_chiplet_scope()).
+    Args:
+        metals_list (metal_layers_list): metals read from stackup (already Reference-resolved)
+    Returns:
+        chiplet_groups: the detected grouping
+    """
+    reverse_refs = {}   # dielectric_layer -> list of dielectric_layer that Reference it
+    for dielectric in self.dielectrics:
+      if dielectric.reference is not None:
+        target = self.get_by_name(dielectric.reference)
+        reverse_refs.setdefault(target, []).append(dielectric)
+
+    branch_points = {target: refs for target, refs in reverse_refs.items() if len(refs) >= 2}
+
+    groups = chiplet_groups()
+    if not branch_points:
+      groups.interposer_dielectrics = list(self.dielectrics)
+      groups.interposer_layers = list(metals_list.metals)
+      return groups
+
+    dielectric_to_group = {}
+    for target, referrers in branch_points.items():
+      for root in referrers:
+        group = chiplet_group(root, target)
+        groups.chiplets.append(group)
+        stack = [root]
+        while stack:
+          node = stack.pop()
+          if dielectric_to_group.get(node) is group:
+            continue
+          dielectric_to_group[node] = group
+          group.dielectrics.append(node)
+          stack.extend(reverse_refs.get(node, []))
+
+    groups.interposer_dielectrics = [d for d in self.dielectrics if d not in dielectric_to_group]
+
+    layer_by_name = {metal.name: metal for metal in metals_list.metals}
+
+    def resolve_layer_group (layer):
+      # a Layer's own Reference can point at a Dielectric (resolve via the graph built
+      # above) or at another Layer (recurse); no Reference at all is unambiguously
+      # interposer - see docstring above
+      if layer.reference is None:
+        return None
+      target_dielectric = self.get_by_name(layer.reference)
+      if target_dielectric is not None:
+        return dielectric_to_group.get(target_dielectric)
+      target_layer = layer_by_name.get(layer.reference)
+      return resolve_layer_group(target_layer) if target_layer is not None else None
+
+    for metal in metals_list.metals:
+      group = resolve_layer_group(metal)
+      if group is None:
+        groups.interposer_layers.append(metal)
+      else:
+        group.layers.append(metal)
+
+    return groups
+
+
+class chiplet_group:
+  """One detected chiplet: the transitive subtree of Dielectrics/Layers rooted at a single
+     Dielectric that references a shared "branch point" (interposer) Dielectric - see
+     dielectric_layers_list.detect_chiplet_groups().
+  """
+
+  def __init__ (self, root, branch_point):
+    """Args:
+        root (dielectric_layer): this chiplet's root Dielectric (the one with
+          Reference=<branch_point.name>)
+        branch_point (dielectric_layer): the shared interposer Dielectric this chiplet (and
+          at least one sibling chiplet) references
+    """
+    self.root = root
+    self.branch_point = branch_point
+    self.id = root.name    # stable id used for the Stackup Preview's chiplet switcher/selection
+    self.dielectrics = []   # dielectric_layer, this chiplet's transitive subtree
+    self.layers = []        # metal_layer, this chiplet's transitive subtree
+
+
+class chiplet_groups:
+  """Result of dielectric_layers_list.detect_chiplet_groups(): the shared interposer plus
+     zero or more detected chiplets. `chiplets == []` means no branching was detected (an
+     ordinary, non-chiplet stackup) - every consumer of this class treats that as "no
+     grouping in effect", preserving today's behavior exactly (see _same_chiplet_scope()).
+  """
+
+  def __init__ (self):
+    self.interposer_dielectrics = []   # dielectric_layer, not part of any chiplet subtree
+    self.interposer_layers = []        # metal_layer, not part of any chiplet subtree
+    self.chiplets = []                 # list of chiplet_group, in file order of their root
+
+
+def _group_id_map (groups, attr):
+  """{element: chiplet_group.id} for every element in every chiplet's `attr` list
+     ("dielectrics" or "layers") - elements not in the map (interposer elements) are treated
+     as group id None by callers via dict.get(). Helper for sort_and_evaluate()/
+     register_metals_inside()'s chiplet-scoping.
+  """
+  mapping = {}
+  for group in groups.chiplets:
+    for element in getattr(group, attr):
+      mapping[element] = group.id
+  return mapping
+
+
+def _same_chiplet_scope (group_id_a, group_id_b):
+  """True if two elements' chiplet-group ids (None = interposer, else a chiplet_group.id) may
+     be compared/linked together: interposer<->anything and chiplet-X<->chiplet-X are allowed,
+     only chiplet-X<->chiplet-Y (different chiplets) is forbidden. Without a groups argument
+     (the default everywhere), both ids are always None here, so this is always True - the
+     original, unscoped behavior.
+  """
+  return group_id_a is None or group_id_b is None or group_id_a == group_id_b
 
 
 # -------------------- conductor layers (metal and via) ---------------------------
@@ -1078,6 +1356,7 @@ class metal_layers_list:
     """
     self.metals = []      # list with conductor objects
     self.lowest = None    # metal with smallest zmin value
+    self.highest = None   # metal with largest zmax value
     self.orphan_layers = []  # list with layers that have no direct neighbor above or below
     self.derived_layers = derived_layers_list()  # empty by default, populated by read_substrate() if XML has a DerivedLayers section
 
@@ -1215,10 +1494,24 @@ class metal_layers_list:
       metal.zmax = metal.zmax + offset
 
 
-  def sort_and_evaluate(self):
+  def sort_and_evaluate(self, groups=None):
     """After reading all metals, sort them by position and detect the neighbors above/below
        This is set in each metal as .above and .below list
+
+       groups (chiplet_groups, optional): if given, two layers are only linked as
+       above/below when they're in the same "scope" (both interposer, or both the same
+       chiplet) - see _same_chiplet_scope(). Without this z-range comparison alone can't
+       tell two different chiplets' same-height layers apart from real vertical neighbors,
+       since both chiplets typically start from the same interposer base. None (the
+       default) preserves the original unscoped behavior exactly.
     """
+    if not self.metals:
+      # nothing to evaluate for a stackup with no Layers yet (e.g. a brand-new,
+      # not-yet-populated stackup in the editor) - leave lowest/highest/
+      # orphan_layers at their __init__ defaults instead of indexing into an
+      # empty list
+      return
+
     # sort the list by zmin of each metal
     self.metals.sort(key=lambda metal: metal.zmin)
     # metal with lowest zmin value
@@ -1228,15 +1521,18 @@ class metal_layers_list:
     # delta for comparison, i.e. what is considered equal
     delta = 1e-5
 
+    layer_group_id = _group_id_map(groups, "layers") if groups is not None else {}
+
     # Build above/below relationships efficiently
     for i, layer in enumerate(self.metals):
+        gid = layer_group_id.get(layer)
         # Layers above: all layers with zmin >= current zmax
         for other in self.metals[i+1:]:
-            if abs(other.zmin - layer.zmax) < delta:
+            if abs(other.zmin - layer.zmax) < delta and _same_chiplet_scope(gid, layer_group_id.get(other)):
                 layer.above.append(other)
         # Layers below: all layers with zmax <= current zmin
         for other in self.metals[:i]:
-            if abs(other.zmax - layer.zmin) < delta:
+            if abs(other.zmax - layer.zmin) < delta and _same_chiplet_scope(gid, layer_group_id.get(other)):
                 layer.below.append(other)
 
     # Identify orphan layers (no above or below)
@@ -1598,8 +1894,16 @@ def parse_substrate (substrate_root, variable_overrides=None):
   # resolve Reference-based layers (offsets from a Dielectric or another Layer edge) into absolute zmin/zmax
   metals_list.resolve_references(dielectrics_list)
 
-  # sort metals by zmin and detect their neighbors above/below
-  metals_list.sort_and_evaluate()
+  # detect a multi-chiplet stackup (interposer + side-by-side chiplet dies) purely from the
+  # Reference graph - see dielectric_layers_list.detect_chiplet_groups(). Attached to
+  # dielectrics_list rather than added as a new return value, same convention as
+  # metals_list.derived_layers above, so existing 3-value unpacking keeps working.
+  chiplet_group_info = dielectrics_list.detect_chiplet_groups(metals_list)
+  dielectrics_list.chiplet_groups = chiplet_group_info
+
+  # sort metals by zmin and detect their neighbors above/below - chiplet-scoped, so two
+  # different chiplets' same-height layers are never mistaken for real vertical neighbors
+  metals_list.sort_and_evaluate(chiplet_group_info)
 
   # get derived layers (boolean operations on other layers) from XML, if present
   # attached to metals_list instead of added as a new return value, so that existing
@@ -1621,8 +1925,9 @@ def parse_substrate (substrate_root, variable_overrides=None):
       exit(1)
     metals_list.add_offset(offset)
 
-  # register metals with the enclosing dielectrics
-  dielectrics_list.register_metals_inside (metals_list)
+  # register metals with the enclosing dielectrics - chiplet-scoped, same reasoning as
+  # sort_and_evaluate() above
+  dielectrics_list.register_metals_inside (metals_list, chiplet_group_info)
 
   return materials_list, dielectrics_list, metals_list
 

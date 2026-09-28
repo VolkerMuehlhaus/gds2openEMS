@@ -42,6 +42,7 @@ from openEMS import openEMS
 from openEMS.physical_constants import *
 
 import numpy as np
+from collections.abc import MutableMapping
 
 try:
     import shapely.geometry
@@ -369,7 +370,46 @@ def _get_simple_polygon_points (poly):
   return result if result else [poly.pts]
 
 
-def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons):
+def _via_fill_factor_suffix (poly, metal, fill_factor_correction):
+    # material name suffix for a via polygon with fill factor correction, '' if unscaled
+    if fill_factor_correction and metal.is_via:
+        fill_factor = round(poly.fill_factor, 2)
+        if fill_factor < 1.0:
+            return f'_x{fill_factor:.2f}'
+    return ''
+
+
+def _apply_fill_factor_correction (allpolygons, materials_list, metals_list, fill_factor_correction):
+    # compute via fill factors once (setupSimulation runs once per excitation), return whether to apply them
+    if not fill_factor_correction:
+        return False
+    if getattr(allpolygons, 'via_fill_factors_computed', False):
+        return True
+    allpolygons.via_fill_factors_computed = True
+    if not allpolygons.via_originals:
+        print("Note: settings['fill_factor_correction'] is set, but no via array merging was done (merge_polygon_size=0), all via fill factors are 1.0.")
+        return True
+    allpolygons.compute_via_fill_factors()
+
+    # summary: polygon count per scaled via material
+    scaled = {}
+    for poly in allpolygons.polygons:
+        for metal in metals_list.getallbylayernumber(poly.layernum) or []:
+            if metal.is_sheet or _is_pec_material(metal.material):
+                continue
+            suffix = _via_fill_factor_suffix(poly, metal, True)
+            if suffix:
+                scaled[(metal.material, suffix)] = scaled.get((metal.material, suffix), 0) + 1
+    print('Via array fill factor correction:')
+    for (materialname, suffix), count in sorted(scaled.items()):
+        sigma = materials_list.get_by_name(materialname).sigma * float(suffix[2:])
+        print(f'  {materialname + suffix}: {count} polygon(s), conductivity = {sigma:.4g} S/m')
+    if not scaled:
+        print('  all via fill factors are 1.00, nothing to scale')
+    return True
+
+
+def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons, fill_factor_correction=False):
 # Add polygons   
 
     # hold CSX material definitions, but only for stackup materials that are actually used
@@ -392,6 +432,12 @@ def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials
                 
                 # check for stackup defintions that are not compatible with this workflow
                 if not metal.is_sheet:
+                    # merged via arrays: separate material with conductivity scaled by the via fill factor
+                    suffix = '' if _is_pec_material(materialname) else _via_fill_factor_suffix(poly, metal, fill_factor_correction)
+                    if suffix:
+                        fill_factor = float(suffix[2:])
+                        materialname = materialname + suffix
+
                     # check for openEMS CSX material object that belongs to this material name
                     if materialname in CSX_materials_list.keys():
                         # already in list, was used before
@@ -403,9 +449,13 @@ def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials
                         CSX_materials_list.update({materialname: CSX_material})
                     else:
                         # create CSX material, was not used before
-                        material = materials_list.get_by_name(materialname)
-                        CSX_material = CSX.AddMaterial(material.name, kappa=material.sigma, epsilon=material.eps)
-                        CSX_materials_list.update({material.name: CSX_material})
+                        if suffix:
+                            material = materials_list.get_by_name(metal.material)
+                            CSX_material = CSX.AddMaterial(materialname, kappa=material.sigma*fill_factor, epsilon=material.eps)
+                        else:
+                            material = materials_list.get_by_name(materialname)
+                            CSX_material = CSX.AddMaterial(material.name, kappa=material.sigma, epsilon=material.eps)
+                        CSX_materials_list.update({materialname: CSX_material})
                         # set color for IHP layers, if available, so that we see that color in AppCSXCAD 3D view
                         if material.color != "":
                             CSX_material.SetColor('#' + material.color, 255)  # transparency value 255 = solid
@@ -698,11 +748,69 @@ def addFielddumps_to_CSX (FDTD, CSX, all_field_dumps, allpolygons, metals_list):
                                      sub_sampling=field_dump.subsampling)
 
             # add dump box
+            if allpolygons.bounding_box.bounding_boxes.get(field_dump.source_layernum) is None:
+                # get_layer_bounding_box() falls back to the global bounding box for a layer without polygons
+                print(f"WARNING: no polygons on layer {field_dump.source_layernum} for field dump '{field_dump.name}', "
+                      f"dump box uses the bounding box of the entire layout instead. "
+                      f"Add layernumbers.extend(field_dumps.dumplayers) before read_gds().")
             xmin, xmax, ymin, ymax  = allpolygons.get_layer_bounding_box(field_dump.source_layernum)
             zmin = metals_list.getbylayername(field_dump.from_layername).zmin + field_dump.offset_bottom
             zmax = metals_list.getbylayername(field_dump.to_layername).zmax + field_dump.offset_top
             Dump.AddBox([xmin,ymin,zmin], [xmax,ymax,zmax])
     
+
+class CaseInsensitiveSettings (MutableMapping):
+    # view on the user's settings dict with case-insensitive key lookup: settings['numthreads']
+    # is found when the code asks for settings['numThreads']. Writes go to the user's dict, under the
+    # spelling already used there. If a key is set in several spellings, the exact spelling wins.
+    _reported = set()
+
+    def __init__ (self, settings):
+        self.settings = settings.settings if isinstance(settings, CaseInsensitiveSettings) else settings
+
+    def _find (self, key):
+        if not isinstance(key, str):
+            return key
+        matches = [k for k in self.settings if isinstance(k, str) and k.lower() == key.lower()]
+        if not matches:
+            return key
+        found = key if key in matches else matches[0]
+        others = [k for k in matches if k != found]
+        report = (key, tuple(matches))
+        if report not in CaseInsensitiveSettings._reported:
+            CaseInsensitiveSettings._reported.add(report)
+            if found != key:
+                print(f"Note: settings['{found}'] is used as settings['{key}']")
+            for other in others:
+                try:
+                    differ = bool(self.settings[other] != self.settings[found])
+                except Exception:
+                    differ = self.settings[other] is not self.settings[found]
+                if differ:
+                    print(f"WARNING: settings['{found}'] and settings['{other}'] are both set, with different values. "
+                          f"Using settings['{found}'] = {self.settings[found]!r}")
+        return found
+
+    def __getitem__ (self, key):
+        return self.settings[self._find(key)]
+
+    def __setitem__ (self, key, value):
+        self.settings[self._find(key)] = value
+
+    def __delitem__ (self, key):
+        del self.settings[self._find(key)]
+
+    def __iter__ (self):
+        return iter(self.settings)
+
+    def __len__ (self):
+        return len(self.settings)
+
+
+def _case_insensitive (settings):
+    # settings[] keys are case-insensitive, see CaseInsensitiveSettings
+    return None if settings is None else CaseInsensitiveSettings(settings)
+
 
 def setupSimulation (excite_portnumbers=None,
                      simulation_ports=None, 
@@ -719,7 +827,8 @@ def setupSimulation (excite_portnumbers=None,
                      xy_mesh_function=util_meshlines.create_xy_mesh_from_polygons, 
                      air_around=0, 
                      field_dumps=False,
-                     settings=None):
+                     settings=None,
+                     fill_factor_correction=False):
 
     # This is the unction for model creation because we need to create and run separate CSX
     # for each excitation. For S11,S21 we only need to excite port 1, but for S22,S12
@@ -728,6 +837,8 @@ def setupSimulation (excite_portnumbers=None,
     # This function can be called in two ways: 
     # 1) by all those positional parameters or 
     # 2) by passing just FDTD and settings dictionary, where everything is inside the settings dict
+
+    settings = _case_insensitive(settings)
 
     if dielectrics_list is None:
         if settings is not None:
@@ -791,8 +902,13 @@ def setupSimulation (excite_portnumbers=None,
                 print("==> settings['easyMesh']=True is ignored until you install that module!\n\n")
                 settings['easyMesh']=False
 
+    # scale via conductivity by the fill factor of merged via arrays
+    if settings is not None:
+        fill_factor_correction = fill_factor_correction or settings.get('fill_factor_correction', False)
+    fill_factor_correction = _apply_fill_factor_correction(allpolygons, materials_list, metals_list, fill_factor_correction)
+
     # add geometries and return list of used materials
-    CSX, CSX_materials_list = addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons)
+    CSX, CSX_materials_list = addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons, fill_factor_correction)
     CSX, CSX_materials_list = addDielectrics_to_CSX (CSX, CSX_materials_list,  materials_list, dielectrics_list, allpolygons, margin, addPEC=False)
 
     # add ports, return CSX and port metadata for saving to JSON
@@ -848,6 +964,8 @@ def runSimulation (excite_portnumbers=None,
     # This function can be called in two ways: 
     # 1) by all those positional parameters or 
     # 2) by passing just FDTD and settings dictionary, where everything is inside the settings dict
+
+    settings = _case_insensitive(settings)
 
     if excite_portnumbers is None:
         if settings is not None:
@@ -971,6 +1089,8 @@ def runSimulation (excite_portnumbers=None,
 def runOpenEMS (excite_ports, settings):
     # This is the all-in-one simulation function that creates openEMS model and runs all ports, on eafter another
 
+    settings = _case_insensitive(settings)
+
     # get settings from simulation model
     preview_only = settings.get('preview_only', False)
     postprocess_only = settings.get('postprocess_only', False)
@@ -1022,7 +1142,8 @@ def runOpenEMS (excite_ports, settings):
                                 refined_cellsize, 
                                 margin, 
                                 unit, 
-                                xy_mesh_function=util_meshlines.create_xy_mesh_from_polygons)
+                                xy_mesh_function=util_meshlines.create_xy_mesh_from_polygons,
+                                fill_factor_correction=settings.get('fill_factor_correction', False))
             
             runSimulation  ([port.portnumber], 
                                 FDTD, 
