@@ -36,7 +36,7 @@ The FDTD flow with gds2openEMS always used filled metals (volumes with conductiv
 
 All plots show the differential L, Q and R, from Zdiff = Z11 − Z12 − Z21 + Z22, same calculation as the gds2palace study. The bottom-right panel zooms in on the low-frequency resistance.
 
-## First rrror source: via array merging, solved by fill factor correction
+## First error source: via array merging, solved by fill factor correction
 
 The effect of via array merging was investigated for this inductor because we have several via arrays, and the 8 μm line width requires small via arrays with only 4x4 vias.  
 
