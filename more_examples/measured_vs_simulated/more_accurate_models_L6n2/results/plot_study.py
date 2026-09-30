@@ -38,7 +38,7 @@ PLANAR_2UM = run("run_L6n2_mergecorrection_sweep_mesh2_limit-60", "Sim: planar p
 PASSICUT_2UM = run("run_L6n2_mergecorrection_passicut_sweep_mesh2_limit-60", "Sim: passivation cut, 2 µm mesh")
 PASSICUT_1UM = run("run_L6n2_mergecorrection_passicut_sweep_mesh1_limit-60", "Sim: passivation cut, 1 µm mesh")
 OEMS_1UM = run("run_L6n2_mergecorrection_passicut_sweep_mesh1_limit-60", "openEMS: passivation cut, 1 µm mesh, -60 dB")
-PALACE_REC = run("palace_L6n2_with_ports_2um_passi3D", "Palace: conformal passivation, filled metals, 2 µm mesh")
+PALACE_REC = run("palace_L6n2_with_ports_2um_passicut", "Palace: passivation cut, filled metals, 2 µm mesh")
 
 PLOTS = {
     "step1_via_merge_correction.png": [MEAS, MESH1, E40_CORR],

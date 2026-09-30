@@ -201,37 +201,37 @@ If you go too coarse, the staircase mesh will create rough edges and even shorts
 
 ## Comparison: measurement, openEMS and gds2palace
 
-The final openEMS model from [Planar vs. cut passivation](#planar-vs-cut-passivation) against the model the gds2palace study recommends:
+The final openEMS model from [the third error source](#third-error-source-non-planar-dielectrics-covering-topmetal2) against gds2palace with the same passivation model:
 
 - **openEMS:** passivation cut, via merge + correction, 1 µm mesh, −60 dB end criterion.
-- **Palace:** conformal passivation, filled metals (volume mesh), via merge + correction, 2 µm mesh. That study found its 1 µm run changed very little at 1.6 times the cost. Its S-parameters are copied to `results/palace_L6n2_with_ports_2um_passi3D.s2p`.
+- **Palace:** passivation cut, filled metals (volume mesh), via merge + correction, 2 µm mesh, from the gds2palace L6n2 study (`more_accurate_models_L6n2_v2`). Its S-parameters are copied to `results/palace_L6n2_with_ports_2um_passicut.s2p`.
 
 | Model | R @ 0.1 GHz | R @ 1 GHz | L @ 1 GHz | Peak Q | SRF | Solve time |
 |---|---|---|---|---|---|---|
 | Measured | 4.55 Ω | 4.86 Ω | 5.01 nH | 15.96 @ 4.71 GHz | 11.07 GHz | |
 | openEMS: passivation cut, 1 µm mesh, −60 dB | 4.67 Ω | 5.14 Ω | 4.81 nH | 14.54 @ 4.72 GHz | 11.08 GHz | 33 min 57 s |
-| Palace: conformal passivation, filled metals, 2 µm mesh | 4.69 Ω | 5.07 Ω | 4.90 nH | 14.67 @ 4.60 GHz | 10.96 GHz | 21 min 57 s |
+| Palace: passivation cut, filled metals, 2 µm mesh | 4.69 Ω | 5.07 Ω | 4.90 nH | 14.83 @ 4.70 GHz | 11.22 GHz | 11 min 43 s |
 
-![openEMS (1 µm mesh) and Palace (2 µm mesh) vs. measurement](results/plots/openems_vs_palace.png)
+![openEMS (1 µm mesh) and Palace (2 µm mesh), both with passivation cut, vs. measurement](results/plots/openems_vs_palace.png)
 
 The two solvers agree with each other within:
 
 - 0.3% in low-frequency resistance;
-- 1.8% in inductance;
-- 0.9% in peak Q;
-- 1.1% in SRF.
+- 1.7% in inductance;
+- 1.9% in peak Q;
+- 1.2% in SRF.
 
-Both deviate from the measurement the same way: low-frequency resistance about 3% high, inductance 2–4% low, and peak Q 8–9% low. The SRF is 0.1% high for openEMS and 1.0% low for Palace.
+Both deviate from the measurement the same way: low-frequency resistance about 3% high, inductance 2–4% low, and peak Q 7–9% low. The SRF is 0.1% high for openEMS and 1.3% high for Palace.
 
-Note that the two use **different passivation models here**:  openEMS uses the "passivation cut" stackup, because that is a better match to the cellsize used in these FDTD models. Palace uses the conformal 3D passivation from derived layers. At a similar mesh size, that took 21 min 57 s in the gds2palace study, vs. 11 min 43 s for the "passivation cut" model, with very similar results. 
+Both use the **"passivation cut" model** here: the correct SiO2 and passivation thickness in the valleys between TopMetal2 traces, without a conformal cover on top of and beside TopMetal2. The stackup files themselves differ, because the openEMS and Palace stackups follow different modelling rules. The gds2palace study recommends the full conformal passivation instead, which openEMS can't resolve at a practical cell size (see [the third error source](#third-error-source-non-planar-dielectrics-covering-topmetal2)). In Palace, the conformal model moves the SRF from 11.22 GHz to 10.96 GHz and peak Q from 14.83 to 14.67, at about twice the solve time (21 min 57 s).
 
 Also note that the **meaning of refined_cellsize is different between both workflows**: in gds2openEMS this is about the **smallest** in-plane cellsize, geometry detail below this will be lost or clipped to the mesh (only thin layers still get smaller cells in z direction). In the gds2palace workflow, refined_cellsize is the **maximum** cellsize along the edges of the conductors, the actual mesh for small details can be much lower, only limited by the geometry itself. Same parameter names, but different meaning, so you usually need to use different values when switching between FDTD and FEM workflow! 
 
-Time reported in the table is the time to get the full S-parameters over the full sweep, running on HP Z2 mini G2a with Ryzen AI Max+ 395 (Strix Halo) and 128 GB RAM. OpenEMS was set to automatic thread count, Palace was using 16 threads, with gds2palace 0.8.0 and its default `complex_coarse_solve` (without it, the same Palace model took 34 min 29 s).
+Time reported in the table is the time to get the full S-parameters over the full sweep, running on HP Z2 mini G2a with Ryzen AI Max+ 395 (Strix Halo) and 128 GB RAM. OpenEMS was set to automatic thread count, Palace was using 16 threads, with gds2palace 0.8.0 and its default `complex_coarse_solve` (without it, the same Palace model took 29 min 4 s).
 
 ## Files
 
 - `run_*.py`: the openEMS model scripts. Results go to `output/`, which is not in git.
-- `results/*.s2p`: the S-parameters used in this README. `palace_L6n2_with_ports_2um_passi3D.s2p` is copied from the gds2palace study (`more_accurate_models_L6n2_v2`).
+- `results/*.s2p`: the S-parameters used in this README. `palace_L6n2_with_ports_2um_passicut.s2p` is copied from the gds2palace study (`more_accurate_models_L6n2_v2`).
 - `results/plot_study.py`: regenerates the L/Q/R plots in `results/plots/` from those files.
 - `results/plot_time_signals.py`: regenerates the excitation spectrum and port voltage plots. It needs the raw time signals in `output/`, so rerun `run_L6n2_mergecorrection_sweep.py` first.
