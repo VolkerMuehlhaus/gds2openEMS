@@ -18,7 +18,7 @@
 
 # Extract objects from layers in GDSII file
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 
 import gdspy
 import numpy as np
@@ -218,6 +218,7 @@ class all_polygons_list:
     """Set fill_factor on every polygon of a via layer that went through via array merging,
     from its overlap with the unmerged vias. Polygons on other layers keep fill_factor 1.0.
     """
+    unmerged_layers = []
     for layernum, original_vias in self.via_originals.items():
       layer_polys = [poly for poly in self.polygons if poly.layernum == layernum]
       pieces = [np.column_stack((poly.pts_x, poly.pts_y)) for poly in layer_polys]
@@ -228,6 +229,14 @@ class all_polygons_list:
       if abs(found_fraction - 1.0) > 0.01:
         print(f'Warning: via fill factors on layer {layernum} account for {100*found_fraction:.1f}% '
               f'of the original via area, expected 100%. Fill factors on this layer may be inaccurate.')
+      # nothing merged, every fill factor 1.0: often the vias in the file are already merged
+      if len(layer_polys) == len(original_vias) and all(abs(f - 1.0) < 1e-6 for f in fill_factors):
+        unmerged_layers.append(layernum)
+    if unmerged_layers:
+      print(f'Note: via array merging did not merge any vias on layer(s) {", ".join(str(n) for n in unmerged_layers)}, '
+            'all fill factors are 1.0 there. If the vias in this GDSII file are already merged (e.g. by '
+            'gds_prepare_for_EM or setupEM Tools > Simplify GDS), fill factor correction is not possible: '
+            'the original vias are not in the file, and the merged vias are treated as solid metal.')
 
   def append (self, poly):
     """Append one instance of gds_polygon
@@ -520,6 +529,132 @@ def merge_via_array (polygons, maxspacing):
   return mergedpolygonset.polygons 
 
 
+def _shapely_polygons (geom):
+  """List of the polygons in a shapely geometry (Polygon, MultiPolygon or GeometryCollection)"""
+  if geom.is_empty:
+    return []
+  if geom.geom_type == 'Polygon':
+    return [geom] if geom.area > 0 else []
+  polygons = []
+  for part in getattr(geom, 'geoms', []):
+    polygons.extend(_shapely_polygons(part))
+  return polygons
+
+
+def metal_islands (polygons):
+  """Connected metal shapes ("islands") of the given polygons, after merging touching/overlapping ones
+
+  Args:
+      polygons (list of point arrays): metal polygons, one or more layers
+
+  Returns:
+      list of shapely Polygon
+  """
+  shapes = [make_valid(ShapelyPolygon(p)) for p in polygons if len(p) >= 3]
+  if not shapes:
+    return []
+  return _shapely_polygons(unary_union(shapes))
+
+
+def _best_island (shape, islands, tree):
+  """Index of the island with the largest overlap area with shape, None if no overlap"""
+  best_index = None
+  best_area = 0.0
+  for i in tree.query(shape, predicate='intersects'):
+    area = islands[i].intersection(shape).area
+    if area > best_area:
+      best_index, best_area = int(i), area
+  return best_index
+
+
+def _to_gdspy_points (polygon):
+  """shapely Polygon -> list of point arrays for gdspy, holes cut out with gdspy (keyholes)"""
+  exterior = np.array(polygon.exterior.coords[:-1])
+  if not polygon.interiors:
+    return [exterior]
+  holes = [np.array(ring.coords[:-1]) for ring in polygon.interiors]
+  result = gdspy.boolean([exterior], holes, "not", max_points=199)
+  return result.polygons if result is not None else []
+
+
+def split_bridging_via_merges (merged, original_vias, above_islands, below_islands, maxspacing):
+  """Via array merging must not connect different metal shapes: closely spaced via arrays that
+  connect different metal shapes above or below would merge into one via and short them.
+
+  Every connected region of the merged vias that overlaps more than one metal island above or
+  below is built again: its vias are grouped by the (island above, island below) pair they land
+  on, each group is merged on its own (same maxspacing), and the result is clipped to the overlap
+  of that island pair. Vias with no metal on a side that has metal elsewhere are kept unmerged.
+  All other regions keep their merged polygons unchanged.
+
+  Args:
+      merged (list of point arrays): result of merge_via_array()
+      original_vias (list of point arrays): unmerged vias
+      above_islands, below_islands (list of shapely Polygon): from metal_islands(), empty list if
+        this side is not known (then it is not used for grouping)
+      maxspacing (float): same as merge_via_array()
+
+  Returns:
+      list of point arrays: merged vias
+      int: number of merged via regions that were split
+      int: number of vias kept unmerged (no metal above or below)
+  """
+  if not merged or (not above_islands and not below_islands):
+    return merged, 0, 0
+
+  above_tree = STRtree(above_islands) if above_islands else None
+  below_tree = STRtree(below_islands) if below_islands else None
+
+  def count_islands (shape, islands, tree):
+    if tree is None:
+      return 0
+    return sum(1 for i in tree.query(shape, predicate='intersects') if islands[i].intersection(shape).area > 1e-9)
+
+  # connected regions of the merged vias (merge_via_array may fracture one region into several polygons)
+  pieces = [make_valid(ShapelyPolygon(p)) for p in merged]
+  regions = _shapely_polygons(unary_union(pieces))
+  bridging = [region for region in regions
+              if count_islands(region, above_islands, above_tree) > 1 or count_islands(region, below_islands, below_tree) > 1]
+  if not bridging:
+    return merged, 0, 0
+  bridging_tree = STRtree(bridging)
+
+  # keep the merged polygons of all regions that do not bridge metal shapes
+  result = [pts for pts, piece in zip(merged, pieces)
+            if not any(bridging[i].intersection(piece).area > 1e-9 for i in bridging_tree.query(piece, predicate='intersects'))]
+
+  # vias of the bridging regions, grouped by metal island pair (-1: this side is not known)
+  groups = {}
+  unmatched = 0
+  for via_pts in original_vias:
+    if len(via_pts) < 3:
+      continue
+    via = make_valid(ShapelyPolygon(via_pts))
+    if len(bridging_tree.query(via.representative_point(), predicate='intersects')) == 0:
+      continue  # merged into a region that is kept as it is
+    above = _best_island(via, above_islands, above_tree) if above_tree is not None else -1
+    below = _best_island(via, below_islands, below_tree) if below_tree is not None else -1
+    if above is None or below is None:
+      result.append(via_pts)  # floating via: keep unmerged
+      unmatched += 1
+    else:
+      groups.setdefault((above, below), []).append(via_pts)
+
+  for (above, below), vias in groups.items():
+    clip = above_islands[above] if above >= 0 else below_islands[below]
+    if above >= 0 and below >= 0:
+      clip = clip.intersection(below_islands[below])
+    clip_points = [pts for poly in _shapely_polygons(clip) for pts in _to_gdspy_points(poly)]
+    if not clip_points:
+      continue
+    clipped = gdspy.boolean(merge_via_array(vias, maxspacing), clip_points, "and", max_points=199)
+    if clipped is not None:
+      result.extend(clipped.polygons)
+
+  return result, len(bridging), unmatched
+
+
+
 def via_fill_factors (pieces, original_vias):
   """Fill factor of each merged via polygon: the fraction of its area covered by the original,
   unmerged vias (1.0 for a single unmerged via, < 1 where merging filled the gaps between vias).
@@ -608,6 +743,9 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
     # cache of raw gdspy polygon arrays per layer number (offset applied), used to compute derived layers
     layer_polygons_gds = {}
 
+    # metal islands per set of metal layer numbers, for via array merging (each metal is next to two via layers)
+    metal_islands_cache = {}
+
     # flatten hierarchy below this cell
     cell.flatten(single_layer=None, single_datatype=None, single_texttype=None)
 
@@ -658,7 +796,26 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
               if (merge_polygon_size>0) and metal.is_via:
                 # keep the unmerged vias, for the optional fill factor correction in simulation setup
                 all_polygons.via_originals.setdefault(layer + layernumber_offset, []).extend(layerpolygons)
+                originals = layerpolygons
                 layerpolygons = merge_via_array (layerpolygons, merge_polygon_size)
+
+                # merged vias must not connect different metal shapes above or below
+                def neighbor_islands (neighbors):
+                  layernums = tuple(sorted(set(int(n.layernum) for n in neighbors if n.is_metal)))
+                  if layernums not in metal_islands_cache:
+                    polygons = [p for num in layernums for purp in purposelist
+                                for p in LPPpolylist.get((num - layernumber_offset, purp), [])]
+                    metal_islands_cache[layernums] = metal_islands(polygons)
+                  return metal_islands_cache[layernums]
+
+                layerpolygons, num_split, num_floating = split_bridging_via_merges(
+                  layerpolygons, originals, neighbor_islands(metal.above), neighbor_islands(metal.below), merge_polygon_size)
+                if num_split > 0:
+                  print(f'Via array merging on {metal.name}: {num_split} merged via region(s) connected '
+                        'different metal shapes above or below, split by metal connectivity')
+                if num_floating > 0:
+                  print(f'Via array merging on {metal.name}: {num_floating} via(s) without metal above or '
+                        'below kept unmerged')
 
             # cache raw polygons for this layer, so derived layers can use it as an operand
             layer_polygons_gds[layer + layernumber_offset] = layerpolygons
