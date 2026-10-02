@@ -218,6 +218,7 @@ class all_polygons_list:
     """Set fill_factor on every polygon of a via layer that went through via array merging,
     from its overlap with the unmerged vias. Polygons on other layers keep fill_factor 1.0.
     """
+    unmerged_layers = []
     for layernum, original_vias in self.via_originals.items():
       layer_polys = [poly for poly in self.polygons if poly.layernum == layernum]
       pieces = [np.column_stack((poly.pts_x, poly.pts_y)) for poly in layer_polys]
@@ -228,6 +229,14 @@ class all_polygons_list:
       if abs(found_fraction - 1.0) > 0.01:
         print(f'Warning: via fill factors on layer {layernum} account for {100*found_fraction:.1f}% '
               f'of the original via area, expected 100%. Fill factors on this layer may be inaccurate.')
+      # nothing merged, every fill factor 1.0: often the vias in the file are already merged
+      if len(layer_polys) == len(original_vias) and all(abs(f - 1.0) < 1e-6 for f in fill_factors):
+        unmerged_layers.append(layernum)
+    if unmerged_layers:
+      print(f'Note: via array merging did not merge any vias on layer(s) {", ".join(str(n) for n in unmerged_layers)}, '
+            'all fill factors are 1.0 there. If the vias in this GDSII file are already merged (e.g. by '
+            'gds_prepare_for_EM or setupEM Tools > Simplify GDS), fill factor correction is not possible: '
+            'the original vias are not in the file, and the merged vias are treated as solid metal.')
 
   def append (self, poly):
     """Append one instance of gds_polygon
