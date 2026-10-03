@@ -43,7 +43,7 @@ Ported the Stackup Editor's Layers-tab column-header click-to-sort (Name alphabe
 
 Added a graphical **Stackup XML Editor** (`pip install gds2openEMS` now also installs a `stackupEditor` console command). Covers Variables, Materials, the Dielectric stack, drawn Layers, Reference-relative positioning, Derived Layers, and Thermal Tables, with a live cross-section preview, undo, and an "Import from ADS Momentum" option (`*.subst`/`*.ltd`). `PySide6` is now a dependency of `gds2openEMS`.
 
-This is a port of the equivalent editor from the sibling `gds2palace_ihp_sg13g2`/`setupEM` project, re-pointed at this repo's own `util_stackup_reader.py` (identical XML schema, independently-maintained reader) - a new top-level `stackup_editor/` package, not shared/symlinked with setupEM's original per this workspace's usual convention for these sibling repos.
+This is a port of the equivalent editor from the sibling `gds2palace_ihp_sg13g2`/`setupEM` project, re-pointed at this repo's own `util_stackup_reader.py` (identical XML schema, independently-maintained reader) - a new top-level `stackup_editor/` package, a separate copy, not shared code with setupEM's original.
 
 ## 02-Sep-2026
 
