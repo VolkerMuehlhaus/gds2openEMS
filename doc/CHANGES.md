@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 02-Oct-2026
+
+Via array merging (`merge_polygon_size > 0`) could short different metal shapes: closely spaced via arrays that connect different metal shapes above or below merged into one via. Now a merged via region that touches more than one metal shape above or below is built again: its vias are grouped by the metal shapes they connect, each group is merged on its own and clipped to the overlap of its metal shapes. The metal layers above and below each via layer come from the XML stackup. Vias without metal above or below stay unmerged. Merged vias that do not connect different metal shapes are not changed, so models without this problem give the same results as before.
+
 ## 28-Sep-2026
 
 New study [L6n2 inductor with openEMS vs. measurement](../more_examples/measured_vs_simulated/more_accurate_models_L6n2/README.md): step by step from the default model to a result within 3% of the measured low-frequency resistance and 0.1% of the measured SRF, with via fill factor correction, the energy end criterion (use −60 dB, or at least −50 dB, for low-frequency R), a passivation cut stackup, and a comparison with gds2palace.
