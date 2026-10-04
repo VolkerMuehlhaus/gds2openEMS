@@ -67,7 +67,7 @@ clone, it is [`workflow/modules/`](workflow/modules/).
 | Topic | Document |
 |---|---|
 | Overview, installation, examples with result plots | [`README.md`](README.md) |
-| User's guide (workflow, settings, ports, meshing, field dumps, antennas, FAQ) | [`doc/userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md`](doc/userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md) (also as PDF in [`doc/`](doc/)) |
+| User's guide (workflow, settings, ports, meshing, field dumps, antennas, FAQ) | [`doc/userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md`](doc/userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md) (also as PDF in [`doc/`](doc/), generated from the Markdown, see [`doc/pdf_build/`](doc/pdf_build/README.md)) |
 | Installing openEMS and CSXCAD | <https://docs.openems.de/python/install.html>, and "Required software and Python modules" in the user's guide |
 | Change log | [`doc/CHANGES.md`](doc/CHANGES.md) |
 | XML stackup format reference | [`doc/XML_stackup_format.md`](doc/XML_stackup_format.md) |

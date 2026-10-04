@@ -1,0 +1,41 @@
+# Builds the PDF user's guide from doc/userguide_md_format/*.md (see doc/pdf_build/README.md).
+# - on every change to the guide: checks that it builds (this also catches links to headings
+#   that don't exist) and offers the PDF as a download in the workflow run ("Artifacts")
+# - on a published release: attaches the PDF to the release
+# Identical in gds2palace_ihp_sg13g2 and gds2openEMS.
+name: User's guide PDF
+
+on:
+  push:
+    paths: ["doc/userguide_md_format/**", "doc/pdf_build/**"]
+  pull_request:
+    paths: ["doc/userguide_md_format/**", "doc/pdf_build/**"]
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # only needed to attach the PDF to a release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r doc/pdf_build/requirements.txt
+      - name: Build PDF
+        run: |
+          name=$(basename doc/userguide_md_format/*.md .md)
+          mkdir -p out
+          python doc/pdf_build/build_userguide_pdf.py -o "out/$name.pdf"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: userguide-pdf
+          path: out/*.pdf
+      - name: Attach PDF to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" out/*.pdf --clobber

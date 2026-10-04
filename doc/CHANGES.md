@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 04-Oct-2026
+
+The PDF user's guide is now generated from the Markdown user's guide [`userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md`](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md), which is the only source from now on: `python doc/pdf_build/build_userguide_pdf.py`, see [`pdf_build/README.md`](pdf_build/README.md). A GitHub workflow builds the PDF when the guide changes and attaches it to each release.
+
 ## 28-Sep-2026
 
 New study [L6n2 inductor with openEMS vs. measurement](../more_examples/measured_vs_simulated/more_accurate_models_L6n2/README.md): step by step from the default model to a result within 3% of the measured low-frequency resistance and 0.1% of the measured SRF, with via fill factor correction, the energy end criterion (use −60 dB, or at least −50 dB, for low-frequency R), a passivation cut stackup, and a comparison with gds2palace.
