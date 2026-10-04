@@ -7,6 +7,7 @@ name: User's guide PDF
 
 on:
   push:
+    branches: ["**"]  # not on tag pushes: a release has its own run below
     paths: ["doc/userguide_md_format/**", "doc/pdf_build/**"]
   pull_request:
     paths: ["doc/userguide_md_format/**", "doc/pdf_build/**"]
