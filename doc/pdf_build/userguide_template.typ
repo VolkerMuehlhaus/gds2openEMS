@@ -58,11 +58,22 @@
 #show link: set text(fill: accent)
 
 // code: DejaVu Sans Mono is built into Typst
-#show raw: set text(font: "DejaVu Sans Mono", size: 8.6pt)
-#show raw.where(block: true): it => block(
-  width: 100%, fill: codebg, inset: (x: 9pt, y: 7pt), radius: 3pt,
-  stroke: (left: 2.5pt + accent.lighten(40%)), it,
-)
+#let code-size = 8.6pt
+#let code-min-size = 6.8pt
+#show raw: set text(font: "DejaVu Sans Mono")
+#show raw.where(block: false): set text(size: code-size)
+// code blocks: font size reduced (down to code-min-size) until the longest line fits, so that
+// long lines (XML, Palace config) don't wrap; lines that are still too long wrap
+#show raw.where(block: true): it => layout(size => {
+  let inset = (x: 9pt, y: 7pt)
+  let avail = size.width - 2 * inset.x - 2.5pt
+  let natural = measure(text(size: code-size, it)).width
+  let s = if natural > avail { calc.max(code-min-size, code-size * (avail / natural)) } else { code-size }
+  block(
+    width: 100%, fill: codebg, inset: inset, radius: 3pt,
+    stroke: (left: 2.5pt + accent.lighten(40%)), text(size: s, it),
+  )
+})
 
 // figures and tables
 #set figure(gap: 0.7em)
