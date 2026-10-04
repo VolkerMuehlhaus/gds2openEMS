@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 04-Oct-2026
+
+The PDF user's guide is now generated from the Markdown user's guide [`userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md`](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md), which is the only source from now on: `python doc/pdf_build/build_userguide_pdf.py`, see [`pdf_build/README.md`](pdf_build/README.md). A GitHub workflow builds the PDF when the guide changes and attaches it to each release.
+
 ## 02-Oct-2026
 
 Via array merging (`merge_polygon_size > 0`) could short different metal shapes: closely spaced via arrays that connect different metal shapes above or below merged into one via. Now a merged via region that touches more than one metal shape above or below is built again: its vias are grouped by the metal shapes they connect, each group is merged on its own and clipped to the overlap of its metal shapes. The metal layers above and below each via layer come from the XML stackup. Vias without metal above or below stay unmerged. Merged vias that do not connect different metal shapes are not changed, so models without this problem give the same results as before.

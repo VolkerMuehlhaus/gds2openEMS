@@ -1,0 +1,3 @@
+# temporary files of doc/pdf_build/build_userguide_pdf.py
+_*.typ
+_pdf_images/
