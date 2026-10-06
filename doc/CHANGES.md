@@ -2,6 +2,18 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 06-Oct-2026
+
+A stackup material's `DielectricLossTangent` (tanδ) is no longer silently dropped. Previously, `util_simulation_setup.py` only passed `epsilon`/`kappa` to `CSX.AddMaterial()`, so a material's declared loss tangent had no effect on the EM solver at all - two stackups differing only in tanδ produced bit-identical S-parameters.
+
+`setupSimulation()` now also reads `settings['fstart']` (previously only `settings['fstop']` was read, for mesh sizing) and accepts both as positional `fstart`/`fstop` parameters too. Whenever a material has `DielectricLossTangent > 0` and this frequency range is available, its CSXCAD material is automatically built as a dispersive `CSPropDebyeMaterial` instead of a plain `CSPropMaterial`: a new helper, `util_debye_fit.fit_wideband_debye()`, fits a causal multi-pole ("wideband"/Djordjevic-Sarkar-style) Debye model that reproduces the declared `Permittivity`/`DielectricLossTangent` as closely as causality (Kramers-Kronig) allows across `[fstart, fstop]`. A single-pole Debye or a Lorentz/Drude model (also available in CSXCAD as `CSPropLorentzMaterial`) were considered and rejected: a single pole only matches the nominal values at one frequency and drifts increasingly far from them away from it, and Lorentz/Drude models a resonant response, which is not the loss mechanism of an ordinary lossy dielectric (orientation-polarization relaxation, i.e. Debye).
+
+No stackup XML changes are needed to use this - existing `DielectricLossTangent` values are picked up automatically, the XML schema is unchanged. Without `fstart`/`fstop`, behavior is unchanged from before (tand silently ignored, with a one-time NOTE printed per material to flag it).
+
+New dependency: `scipy` (used for the non-negative least-squares pole fit).
+
+Validated against a closed-form textbook microstrip attenuation prediction - see [`more_examples/textbook_microstrip_attenuation/`](../more_examples/textbook_microstrip_attenuation/).
+
 ## 04-Oct-2026
 
 The PDF user's guide is now generated from the Markdown user's guide [`userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md`](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md), which is the only source from now on: `python doc/pdf_build/build_userguide_pdf.py`, see [`pdf_build/README.md`](pdf_build/README.md). A GitHub workflow builds the PDF when the guide changes and attaches it to each release.

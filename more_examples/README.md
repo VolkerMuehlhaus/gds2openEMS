@@ -16,6 +16,7 @@ README with the details.
 | [`numThreads`](numThreads) | Forcing a fixed openEMS solver thread count instead of automatic detection |
 | [`parameterized_XML_stackup`](parameterized_XML_stackup) | Overriding stackup `<Variable>`s from a Python script without editing the XML file |
 | [`resistors_sg13g2`](resistors_sg13g2) | Simulating an IHP SG13G2 `Rsil` resistor recognized via `<DerivedLayers>` boolean operations |
+| [`textbook_microstrip_attenuation`](textbook_microstrip_attenuation) | Dielectric loss tangent (Debye dispersive model) on a textbook FR4 substrate, validated against the closed-form microstrip attenuation formula |
 
 Three examples (`combine_layout_sources`, `easyMesh`, `local_modules_copy`)
 share the same simple 2-port via-port test line

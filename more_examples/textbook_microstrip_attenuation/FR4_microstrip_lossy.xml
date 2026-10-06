@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+  <Stackup schemaVersion="2.0">
+    <!--
+      Simple 2-conductor microstrip stackup for the textbook dielectric-attenuation example
+      (see README.md). This is the LOSSY copy: DielectricLossTangent="0.02" on the FR4
+      substrate, everything else identical to FR4_microstrip_lossless.xml.
+
+      Substrate parameters are Pozar "Microwave Engineering" Table 3.1-style typical FR4 (G10)
+      values: Permittivity=4.3, DielectricLossTangent=0.02 (applied here). Substrate
+      thickness h=1600um (1.6mm) is a standard FR4 PCB thickness.
+    -->
+    <Materials>
+      <Material Name="Copper" Type="Conductor" Permittivity="1" DielectricLossTangent="0"
+                Conductivity="5.8e7" Color="cc7733"/>
+      <Material Name="FR4" Type="Dielectric" Permittivity="4.3" DielectricLossTangent="0.02"
+                Conductivity="0" Color="2a7a2a"/>
+      <Material Name="AIR" Type="Dielectric" Permittivity="1.0" DielectricLossTangent="0.0"
+                Conductivity="0" Color="d0d0d0"/>
+    </Materials>
+    <ELayers LengthUnit="um">
+      <Dielectrics>
+        <Dielectric Name="AIR_above" Material="AIR" Zmin="1670" Zmax="11670" />
+        <Dielectric Name="FR4" Material="FR4" Zmin="35" Zmax="1635" />
+      </Dielectrics>
+      <Layers>
+        <Substrate Offset="0"/>
+        <Layer Name="GND" Type="conductor" Zmin="0" Zmax="35" Material="Copper" Layer="1" />
+        <Layer Name="Trace" Type="conductor" Zmin="1635" Zmax="1670" Material="Copper" Layer="134" />
+      </Layers>
+    </ELayers>
+  </Stackup>
