@@ -54,7 +54,7 @@ elements later in the file.
 | `Name`                     | yes      | —       | Material name, referenced elsewhere as `Material="..."`. |
 | `Type`                     | yes      | —       | `Conductor`, `Dielectric`, `Semiconductor`, or `Resistor`. |
 | `Permittivity`              | no       | `1`     | Relative permittivity (εr). |
-| `DielectricLossTangent`     | no       | `0`     | Loss tangent. |
+| `DielectricLossTangent`     | no       | `0`     | Loss tangent (tanδ). When nonzero, and `setupSimulation()` is given a simulation frequency range (`settings['fstart']`/`settings['fstop']`, or positional `fstart`/`fstop`), this material is automatically realized as a dispersive (frequency-dependent) wideband Debye material instead of a plain, frequency-independent one — see [Dielectric loss tangent / dispersive materials](#dielectric-loss-tangent--dispersive-materials) below. Without a frequency range, tanδ has no effect (same as before this feature existed). |
 | `Conductivity`               | no       | `0`     | Conductivity in S/m. Used for `Conductor`/`Semiconductor` materials. |
 | `Rs`                        | no       | `0`     | Sheet resistance in Ω/square. Used for `Resistor` materials (paired with a zero-thickness `Type="sheet"` layer). |
 | `Density`                   | no       | `1`     | Mass density, used by thermal simulation setup. |
@@ -79,6 +79,41 @@ elements later in the file.
   <Material Name="RSIL" Type="Resistor" Rs="7" Color="d0d0d0"/>
 </Materials>
 ```
+
+### Dielectric loss tangent / dispersive materials
+
+`DielectricLossTangent` is a single, frequency-independent number in the XML, as measured or
+specified for the material (datasheets normally quote it this way too, without "measured at"
+qualification). A real dielectric's loss is never actually frequency-independent — the
+Kramers-Kronig relations require it to vary with frequency — so applying it as-is at every
+simulated frequency is itself an approximation, just a much better one than the alternative of
+ignoring it.
+
+When `setupSimulation()` is given the simulation's frequency range (`settings['fstart']`/
+`settings['fstop']`, or positional `fstart`/`fstop`), any material with
+`DielectricLossTangent > 0` is automatically converted into a dispersive `CSPropDebyeMaterial`,
+using a causal, multi-pole ("wideband" / Djordjevic-Sarkar-style) Debye fit
+(`util_debye_fit.fit_wideband_debye()`) that reproduces the declared `Permittivity` and
+`DielectricLossTangent` as closely as causality allows across `[fstart, fstop]`. This is the
+standard model for exactly this situation (a single eps_r/tanδ datasheet value that needs to
+become a causal broadband material) — a single-pole Debye model only matches the nominal
+values at the one frequency it was fitted to and drifts away from them elsewhere in the band; a
+Lorentz/Drude model (also available in CSXCAD, as `CSPropLorentzMaterial`) represents a
+resonant response, which is physically the wrong mechanism for ordinary dielectric loss
+(orientation-polarization relaxation, i.e. Debye).
+
+For a very lossy material simulated across many decades, the fitted real permittivity will
+show some roll-off with frequency rather than staying exactly at the nominal `Permittivity`
+value — this is the same causality constraint, not a fitting defect, and is bigger the larger
+`DielectricLossTangent` is and the wider `[fstart, fstop]` is.
+
+No change to the XML file itself is needed to use this — existing `DielectricLossTangent`
+values are picked up automatically. Without a frequency range passed to `setupSimulation()`,
+behavior is unchanged from before this feature existed: tanδ has no effect, and a one-time
+`NOTE:` is printed per affected material. See
+[`more_examples/textbook_microstrip_attenuation/`](../more_examples/textbook_microstrip_attenuation/)
+for a worked example comparing simulated results, with and without this feature, against the
+closed-form textbook microstrip attenuation formula.
 
 ## `<ELayers>`
 

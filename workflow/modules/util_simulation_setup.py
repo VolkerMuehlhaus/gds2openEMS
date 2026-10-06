@@ -26,10 +26,12 @@ import inspect
 
 from . import util_utilities as utilities
 from . import util_meshlines
+from . import util_debye_fit
 from .util_stackup_reader import PEC_MATERIAL_NAME
 
 from CSXCAD import ContinuousStructure
 from CSXCAD import AppCSXCAD_BIN
+from CSXCAD.CSProperties import CSPropDebyeMaterial
 
 
 def _is_pec_material (materialname):
@@ -409,7 +411,56 @@ def _apply_fill_factor_correction (allpolygons, materials_list, metals_list, fil
     return True
 
 
-def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons, fill_factor_correction=False):
+def _create_CSX_material (CSX, name, material, fstart=None, fstop=None, sigma_override=None):
+  """Create the CSXCAD material property for one stackup `material`, under `name`.
+
+  If `material` declares a DielectricLossTangent > 0 and a simulation frequency range
+  (fstart/fstop) is available, this creates a dispersive CSPropDebyeMaterial using a wideband
+  multi-pole Debye fit (see util_debye_fit.fit_wideband_debye) instead of the previous
+  frequency-independent CSPropMaterial, so the declared loss tangent actually reaches the EM
+  solver. Any bulk conductivity (material.sigma, or sigma_override for a via-fill-factor-scaled
+  material) still applies on top of this, unchanged - ohmic conduction loss and Debye
+  dielectric relaxation loss are independent, additive dissipation mechanisms, so combining
+  them is physically valid.
+
+  Falls back to the previous frequency-independent material (tand silently ignored, exactly
+  as before this function existed) whenever tand is 0, or a frequency range isn't available -
+  this keeps every existing caller that doesn't pass fstart/fstop working unchanged.
+
+  Args:
+      CSX (ContinuousStructure): target CSX structure
+      name (string): name for the new CSXCAD material property
+      material (stackup_material): source material (see util_stackup_reader.stackup_material)
+      fstart (float, optional): lowest simulated frequency in Hz, for the Debye fit
+      fstop (float, optional): highest simulated frequency in Hz, for the Debye fit
+      sigma_override (float, optional): bulk conductivity to use instead of material.sigma
+        (via array fill factor correction scales this per merged-via polygon)
+
+  Returns:
+      CSProperties: the new material property (CSPropDebyeMaterial or CSPropMaterial)
+  """
+  sigma = material.sigma if sigma_override is None else sigma_override
+
+  if material.tand > 0 and fstop is not None and fstop > 0:
+    eps_inf, poles = util_debye_fit.fit_wideband_debye(material.eps, material.tand, fstart, fstop)
+    CSX_material = CSPropDebyeMaterial(CSX.GetParameterSet(), order=max(len(poles), 1),
+                                        epsilon=eps_inf, kappa=sigma)
+    CSX_material.SetName(name)
+    for order_index, (delta_eps, relax_time) in enumerate(poles):
+      CSX_material.SetDispersiveMaterialProperty(order_index, eps_delta=delta_eps, eps_relax=relax_time)
+    CSX.AddProperty(CSX_material)
+  else:
+    if material.tand > 0:
+      print('NOTE: material ', material.name, ' declares DielectricLossTangent=', material.tand,
+            ' but no simulation frequency range was passed to setupSimulation() (fstart/fstop, '
+            'or settings["fstart"]/settings["fstop"]) - using a frequency-independent '
+            '(lossless-dielectric) approximation instead, i.e. the same behavior as before '
+            'automatic Debye fitting existed.')
+    CSX_material = CSX.AddMaterial(name, kappa=sigma, epsilon=material.eps)
+  return CSX_material
+
+
+def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons, fill_factor_correction=False, fstart=None, fstop=None):
 # Add polygons   
 
     # hold CSX material definitions, but only for stackup materials that are actually used
@@ -451,10 +502,10 @@ def addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials
                         # create CSX material, was not used before
                         if suffix:
                             material = materials_list.get_by_name(metal.material)
-                            CSX_material = CSX.AddMaterial(materialname, kappa=material.sigma*fill_factor, epsilon=material.eps)
+                            CSX_material = _create_CSX_material(CSX, materialname, material, fstart=fstart, fstop=fstop, sigma_override=material.sigma*fill_factor)
                         else:
                             material = materials_list.get_by_name(materialname)
-                            CSX_material = CSX.AddMaterial(material.name, kappa=material.sigma, epsilon=material.eps)
+                            CSX_material = _create_CSX_material(CSX, material.name, material, fstart=fstart, fstop=fstop)
                         CSX_materials_list.update({materialname: CSX_material})
                         # set color for IHP layers, if available, so that we see that color in AppCSXCAD 3D view
                         if material.color != "":
@@ -538,7 +589,7 @@ def get_margins (margin):
 
     
 
-def addDielectrics_to_CSX (CSX, CSX_materials_list,  materials_list, dielectrics_list, allpolygons, margin, addPEC):
+def addDielectrics_to_CSX (CSX, CSX_materials_list,  materials_list, dielectrics_list, allpolygons, margin, addPEC, fstart=None, fstop=None):
 # Add dielectric layers (these extend through simulation area and have no polygons in GDSII)
 
     # margin defined by user can be single value or list, get that now
@@ -557,7 +608,7 @@ def addDielectrics_to_CSX (CSX, CSX_materials_list,  materials_list, dielectrics
             materialname = materialname + '_1'
             
         # create CSX material
-        CSX_material = CSX.AddMaterial(materialname, kappa=material.sigma, epsilon=material.eps)
+        CSX_material = _create_CSX_material(CSX, materialname, material, fstart=fstart, fstop=fstop)
         CSX_materials_list.update({materialname: CSX_material})
         # set color for IHP layers, if available
         if material.color != "":
@@ -828,7 +879,9 @@ def setupSimulation (excite_portnumbers=None,
                      air_around=0, 
                      field_dumps=False,
                      settings=None,
-                     fill_factor_correction=False):
+                     fill_factor_correction=False,
+                     fstart=None,
+                     fstop=None):
 
     # This is the unction for model creation because we need to create and run separate CSX
     # for each excitation. For S11,S21 we only need to excite port 1, but for S22,S12
@@ -857,6 +910,11 @@ def setupSimulation (excite_portnumbers=None,
             xy_mesh_function   = settings.get('xy_mesh_function', util_meshlines.create_xy_mesh_from_polygons)
             air_around         = settings.get('air_around', 0)
             field_dumps        = settings.get('field_dumps', False)
+
+            # fstart/fstop: also used (beyond the cellsize calculation right below) to fit a
+            # wideband Debye dispersive model for any stackup material with a nonzero
+            # DielectricLossTangent - see _create_CSX_material()
+            fstart = settings.get('fstart',None)
 
             # calculate maximum cellsize from wavelength in dielectric
             fstop = settings.get('fstop',None)
@@ -908,8 +966,8 @@ def setupSimulation (excite_portnumbers=None,
     fill_factor_correction = _apply_fill_factor_correction(allpolygons, materials_list, metals_list, fill_factor_correction)
 
     # add geometries and return list of used materials
-    CSX, CSX_materials_list = addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons, fill_factor_correction)
-    CSX, CSX_materials_list = addDielectrics_to_CSX (CSX, CSX_materials_list,  materials_list, dielectrics_list, allpolygons, margin, addPEC=False)
+    CSX, CSX_materials_list = addGeometry_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons, fill_factor_correction, fstart=fstart, fstop=fstop)
+    CSX, CSX_materials_list = addDielectrics_to_CSX (CSX, CSX_materials_list,  materials_list, dielectrics_list, allpolygons, margin, addPEC=False, fstart=fstart, fstop=fstop)
 
     # add ports, return CSX and port metadata for saving to JSON
     CSX = addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons)
