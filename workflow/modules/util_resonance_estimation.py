@@ -63,7 +63,7 @@ HOLDOUT_TOL = 1e-2      # raise the order while the holdout error (relative ener
 ORDER_GAIN = 10         # or while the next order still improves it this much
 ORDERS = range(1, 13)
 SM_ITER = 5             # Steiglitz-McBride iterations for the ARX fit
-MP_MIN_SAMPLES = 20     # free-decay samples needed for the matrix pencil fit
+MP_MIN_SAMPLES = 30     # free-decay samples needed for the matrix pencil fit (20 was not always stable)
 FREE_DECAY_DB = -60     # the excitation is over when it is this far below its peak
 TAIL_REL = 1e-7         # extend the signals until the slowest pole has decayed to this level
 NUM_FREQ = 201          # frequency points for the convergence check
@@ -287,14 +287,27 @@ def _rebuild(sig, keys, X, dt):
     return out
 
 
-def extrapolate(sig, te, e, info=None):
-    """Extend the port signals of one excitation: free-decay fit if enough free decay was recorded,
-    else known-input fit. Returns None if neither is possible yet."""
+def free_decay_samples(sig, te, e):
+    """Number of samples recorded after the excitation is over (below FREE_DECAY_DB)."""
+    t = next(iter(sig.values()))[0]
+    t_free = te[np.where(abs(e) > abs(e).max() * 10**(FREE_DECAY_DB / 20))[0][-1]]
+    return max(min(len(x) for _, x in sig.values()) - int(np.searchsorted(t, t_free)), 0)
+
+
+def choose_method(sig, te, e):
+    """'MP' (free-decay fit) if enough free decay was recorded, else 'ARX' (known-input fit)."""
+    return 'MP' if free_decay_samples(sig, te, e) >= MP_MIN_SAMPLES else 'ARX'
+
+
+def extrapolate(sig, te, e, info=None, method=None):
+    """Extend the port signals of one excitation with the given method ('MP' or 'ARX'), or with the one
+    choose_method() picks. Extrapolations that are compared with each other must use the same method:
+    near MP_MIN_SAMPLES, the two methods can give different results. Returns None if not possible."""
     info = {} if info is None else info
-    ext = _extrapolate_mp(sig, te, e, info)
-    if ext is None:
-        ext = _extrapolate_arx(sig, te, e, info)
-    return ext
+    info['free_samples'] = free_decay_samples(sig, te, e)
+    if (method or choose_method(sig, te, e)) == 'MP':
+        return _extrapolate_mp(sig, te, e, info)
+    return _extrapolate_arx(sig, te, e, info)
 
 
 def truncate(sig, n):
@@ -338,6 +351,7 @@ class Monitor(threading.Thread):
         self.excited = excite_portnumbers[0]
         self.done = threading.Event()
         self.stop_reason = None
+        self.converged_ext = None    # extrapolation that met the stop rule, fallback for finalize()
         self.error = None
 
     def run(self):
@@ -364,24 +378,28 @@ class Monitor(threading.Thread):
                 if freqs is None:
                     freqs, band = _band(te, e, t[1] - t[0])
                 last_n = n
-                cols = []
+                # one method for all three extrapolations, chosen from the shortest record
+                method = choose_method(truncate(sig, n - 2 * LAG), te, e)
+                exts, cols = [], []
                 for m in (n, n - LAG, n - 2 * LAG):
-                    ext = extrapolate(truncate(sig, m), te, e)
+                    ext = extrapolate(truncate(sig, m), te, e, method=method)
                     if ext is None:
                         break
+                    exts.append(ext)
                     cols.append(_column(ext, self.excited, self.z0, freqs, band))
                 if len(cols) == 3:
                     d = max(abs(cols[0] - cols[1]).max(), abs(cols[1] - cols[2]).max())
                     if d < TOLERANCE:
+                        self.converged_ext = exts[0]
                         self.stop_reason = f'converged after {t[n - 1] * 1e12:.1f} ps (change {d:.1e})'
                         print(f'[resonance_estimation] Extrapolated S-parameters converged after '
-                              f'{t[n - 1] * 1e12:.1f} ps, stopping openEMS')
+                              f'{t[n - 1] * 1e12:.1f} ps, stopping openEMS', flush=True)
                         self._stop_openEMS()
                         return
         except Exception as ex:      # the monitor must never break the simulation itself
             self.error = repr(ex)
             print('[resonance_estimation] Monitor stopped after an error, openEMS continues to its '
-                  'energy limit:', ex)
+                  'energy limit:', ex, flush=True)
 
     def _stop_openEMS(self):
         if hasattr(self.FDTD, 'SetAbort'):
@@ -401,8 +419,12 @@ def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
     ports = sorted(z0)
     excited = excite_portnumbers[0]
     log = [f'Resonance estimation for excitation {excite_portnumbers}']
+    stopped_early = monitor is not None and monitor.stop_reason is not None
     if monitor is not None:
         log.append('openEMS stopped: ' + (monitor.stop_reason or 'at its energy limit (energy_limit)'))
+        if stopped_early:
+            log.append('(openEMS then reports that the max. number of timesteps was reached: that refers to '
+                       'this stop, not to a timestep limit)')
         if monitor.error:
             log.append('Monitor error: ' + monitor.error)
     ok = False
@@ -414,10 +436,13 @@ def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
         te, e = exc
         n = min(len(t) for t, _ in sig.values())
         t = next(iter(sig.values()))[0]
+        if n <= 3 * LAG + 10:
+            raise RuntimeError('record too short to extrapolate')
         freqs, band = _band(te, e, t[1] - t[0])
+        method = choose_method(truncate(sig, n - LAG), te, e)   # same method for both extrapolations
         info = {}
-        ext = extrapolate(sig, te, e, info)
-        ext_lag = extrapolate(truncate(sig, n - LAG), te, e) if n > 3 * LAG + 10 else None
+        ext = extrapolate(truncate(sig, n), te, e, info, method=method)
+        ext_lag = extrapolate(truncate(sig, n - LAG), te, e, method=method)
         if ext is None or ext_lag is None:
             raise RuntimeError('record too short to extrapolate')
         change = abs(_column(ext, excited, z0, freqs, band) - _column(ext_lag, excited, z0, freqs, band)).max()
@@ -425,23 +450,34 @@ def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
         log += [f'Recorded until {t[n - 1] * 1e12:.1f} ps, {info.get("free_samples", 0)} samples after the excitation',
                 f'Method: {info["method"]}, {info["order"]} poles, slowest time constant {tau.max() * 1e12:.1f} ps',
                 f'Change against the extrapolation {LAG} samples earlier: {change:.1e} (limit {SELF_CHECK:.0e})']
-        if change > SELF_CHECK:
-            log.append('Result not trusted: S-parameters are calculated from the original openEMS data')
-        else:
-            folder = os.path.join(excitation_path, RESULT_FOLDER)
-            os.makedirs(folder, exist_ok=True)
-            for (i, q), (tt, xx) in ext.items():
-                kind = 'voltage' if q == 'u' else 'current'
-                with open(os.path.join(folder, f'port_{q}t_{i}'), 'w') as f:
-                    f.write(f'% {kind} probe, extended by gds2openEMS resonance estimation beyond '
-                            f'{sig[(i, q)][0][-1]:.6e} s\n% t/s\t{kind}\n')
-                    np.savetxt(f, np.column_stack([tt, xx]), fmt='%.12e', delimiter='\t')
+        if change <= SELF_CHECK:
+            _write_extended(excitation_path, ext, sig)
             ok = True
             log.append('Extended signals written to ' + RESULT_FOLDER + '/, used for the S-parameters')
+        elif stopped_early and monitor.converged_ext is not None:
+            # the record ends early because the monitor stopped openEMS: the original data alone would
+            # be truncated, so use the extrapolation that met the stop rule
+            _write_extended(excitation_path, monitor.converged_ext, sig)
+            ok = True
+            log.append('Final extrapolation not stable; the extrapolation that met the stop rule is written to '
+                       + RESULT_FOLDER + '/ and used for the S-parameters')
+        else:
+            log.append('Result not trusted: S-parameters are calculated from the original openEMS data')
     except Exception as ex:
         log.append(f'Resonance estimation not applied ({ex}): S-parameters are calculated from the '
                    'original openEMS data')
     with open(os.path.join(excitation_path, LOG_FILE), 'w') as f:
         f.write('\n'.join(log) + '\n')
-    print('[resonance_estimation] ' + '\n[resonance_estimation] '.join(log[1:]))
+    print('[resonance_estimation] ' + '\n[resonance_estimation] '.join(log[1:]), flush=True)
     return ok
+
+
+def _write_extended(excitation_path, ext, sig):
+    folder = os.path.join(excitation_path, RESULT_FOLDER)
+    os.makedirs(folder, exist_ok=True)
+    for (i, q), (tt, xx) in ext.items():
+        kind = 'voltage' if q == 'u' else 'current'
+        with open(os.path.join(folder, f'port_{q}t_{i}'), 'w') as f:
+            f.write(f'% {kind} probe, extended by gds2openEMS resonance estimation beyond '
+                    f'{sig[(i, q)][0][-1]:.6e} s\n% t/s\t{kind}\n')
+            np.savetxt(f, np.column_stack([tt, xx]), fmt='%.12e', delimiter='\t')
