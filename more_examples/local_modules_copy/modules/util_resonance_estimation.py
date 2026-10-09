@@ -67,6 +67,9 @@ MP_MIN_SAMPLES = 30     # free-decay samples needed for the matrix pencil fit (2
 FREE_DECAY_DB = -60     # the excitation is over when it is this far below its peak
 TAIL_REL = 1e-7         # extend the signals until the slowest pole has decayed to this level
 NUM_FREQ = 201          # frequency points for the convergence check
+TAU_FACTOR = 3.0        # tail_check(): effective time constant of the tail at most this many times the
+MIN_RECORD_SAMPLES = 8  #   free decay recorded (at least this many samples), and the tail does not
+MAX_GROWTH = 3.0        #   exceed this many times the signal level at the end of the record
 
 
 # ------------------------------------------------------------------------------------ file access
@@ -310,6 +313,31 @@ def extrapolate(sig, te, e, info=None, method=None):
     return _extrapolate_arx(sig, te, e, info)
 
 
+def tail_check(sig, ext, te, e):
+    """Plausibility of an extrapolation, independent of the fit method: the extended part (tail) must not
+    grow, and it must not decay much more slowly than the record can tell. For a decaying exponential with
+    amplitude A at the end of the record and time constant tau, the tail energy is A**2 * tau / 2; tau_eff is
+    that relation applied to all port signals together (each normalized to its peak). A slow component with
+    negligible amplitude adds little tail energy and passes; one that dominates the tail does not.
+    Returns (ok, tau_eff, t_free_recorded, growth)."""
+    t = next(iter(sig.values()))[0]
+    dt = t[1] - t[0]
+    t_free = te[np.where(abs(e) > abs(e).max() * 10**(FREE_DECAY_DB / 20))[0][-1]]
+    end_energy, tail_energy, growth = 0.0, 0.0, 0.0
+    for k, (_, y) in sig.items():
+        peak = max(abs(y).max(), 1e-300)
+        last = y[-LAG:] / peak
+        tail = ext[k][1][len(y):] / peak
+        end_energy += np.mean(last**2)
+        tail_energy += np.sum(tail**2) * dt
+        if len(tail):
+            growth = max(growth, abs(tail).max() / max(abs(y[-2 * LAG:]).max() / peak, 1e-300))
+    tau_eff = 2 * tail_energy / max(end_energy, 1e-300)
+    t_rec = max(t[-1] - t_free, MIN_RECORD_SAMPLES * dt)
+    ok = tau_eff <= TAU_FACTOR * t_rec and growth <= MAX_GROWTH
+    return ok, tau_eff, t_rec, growth
+
+
 def truncate(sig, n):
     """The first n samples of every signal (current probes may have one sample more than voltage probes)."""
     return {k: (t[:n], x[:n]) for k, (t, x) in sig.items()}
@@ -339,9 +367,55 @@ def _band(te, e, dt):
     return freqs, E > 0.01 * E.max()
 
 
+def convergence_check(sig, n, te, e, excited, z0, freqs, band):
+    """The stop rule, applied to the first n samples of a growing record: extrapolations from n, n-LAG and
+    n-2*LAG samples (one method, chosen from the shortest record) agree within TOLERANCE, and the newest
+    one passes tail_check(). Returns (converged, change, extrapolation from n samples)."""
+    method = choose_method(truncate(sig, n - 2 * LAG), te, e)
+    exts, cols = [], []
+    for m in (n, n - LAG, n - 2 * LAG):
+        ext = extrapolate(truncate(sig, m), te, e, method=method)
+        if ext is None:
+            return False, np.inf, None
+        exts.append(ext)
+        cols.append(_column(ext, excited, z0, freqs, band))
+    change = max(abs(cols[0] - cols[1]).max(), abs(cols[1] - cols[2]).max())
+    converged = change < TOLERANCE and tail_check(truncate(sig, n), exts[0], te, e)[0]
+    return converged, change, exts[0]
+
+
+def final_extrapolation(sig, te, e, excited, z0, freqs, band, converged_ext=None):
+    """The extrapolation used for the S-parameters after the run, or None for the original data. The
+    extrapolation of the complete record must agree with the one from LAG samples less within SELF_CHECK and
+    pass tail_check(). If it does not, and the monitor stopped openEMS early (converged_ext), the extrapolation
+    that met the stop rule is used: the original data alone would be truncated. Returns (ext, log lines)."""
+    n = min(len(x) for _, x in sig.values())
+    t = next(iter(sig.values()))[0]
+    method = choose_method(truncate(sig, n - LAG), te, e)       # same method for both extrapolations
+    info = {}
+    ext = extrapolate(truncate(sig, n), te, e, info, method=method)
+    ext_lag = extrapolate(truncate(sig, n - LAG), te, e, method=method)
+    if ext is None or ext_lag is None:
+        raise RuntimeError('record too short to extrapolate')
+    change = abs(_column(ext, excited, z0, freqs, band) - _column(ext_lag, excited, z0, freqs, band)).max()
+    plausible, tau_eff, t_rec, growth = tail_check(truncate(sig, n), ext, te, e)
+    tau = -info['dt'] / np.log(abs(info['poles']))
+    log = [f'Recorded until {t[n - 1] * 1e12:.1f} ps, {info.get("free_samples", 0)} samples after the excitation',
+           f'Method: {info["method"]}, {info["order"]} poles, slowest time constant {tau.max() * 1e12:.1f} ps',
+           f'Change against the extrapolation {LAG} samples earlier: {change:.1e} (limit {SELF_CHECK:.0e})',
+           f'Tail check: effective time constant {tau_eff * 1e12:.1f} ps vs. {t_rec * 1e12:.1f} ps of recorded '
+           f'free decay (limit {TAU_FACTOR:g}x), growth {growth:.2f} (limit {MAX_GROWTH:g})']
+    if change <= SELF_CHECK and plausible:
+        return ext, log + ['Extended signals written to ' + RESULT_FOLDER + '/, used for the S-parameters']
+    if converged_ext is not None:
+        return converged_ext, log + ['Final extrapolation not trusted; the extrapolation that met the stop rule is '
+                                     'written to ' + RESULT_FOLDER + '/ and used for the S-parameters']
+    return None, log + ['Result not trusted: S-parameters are calculated from the original openEMS data']
+
+
 class Monitor(threading.Thread):
     """Runs while openEMS solves one excitation: reads the growing probe files, extrapolates, and stops
-    openEMS once the extrapolated S-parameters have converged."""
+    openEMS once the extrapolated S-parameters have converged (convergence_check())."""
 
     def __init__(self, FDTD, sim_path, excitation_path, excite_portnumbers):
         super().__init__(daemon=True)
@@ -378,24 +452,14 @@ class Monitor(threading.Thread):
                 if freqs is None:
                     freqs, band = _band(te, e, t[1] - t[0])
                 last_n = n
-                # one method for all three extrapolations, chosen from the shortest record
-                method = choose_method(truncate(sig, n - 2 * LAG), te, e)
-                exts, cols = [], []
-                for m in (n, n - LAG, n - 2 * LAG):
-                    ext = extrapolate(truncate(sig, m), te, e, method=method)
-                    if ext is None:
-                        break
-                    exts.append(ext)
-                    cols.append(_column(ext, self.excited, self.z0, freqs, band))
-                if len(cols) == 3:
-                    d = max(abs(cols[0] - cols[1]).max(), abs(cols[1] - cols[2]).max())
-                    if d < TOLERANCE:
-                        self.converged_ext = exts[0]
-                        self.stop_reason = f'converged after {t[n - 1] * 1e12:.1f} ps (change {d:.1e})'
-                        print(f'[resonance_estimation] Extrapolated S-parameters converged after '
-                              f'{t[n - 1] * 1e12:.1f} ps, stopping openEMS', flush=True)
-                        self._stop_openEMS()
-                        return
+                converged, change, ext = convergence_check(sig, n, te, e, self.excited, self.z0, freqs, band)
+                if converged:
+                    self.converged_ext = ext
+                    self.stop_reason = f'converged after {t[n - 1] * 1e12:.1f} ps (change {change:.1e})'
+                    print(f'[resonance_estimation] Extrapolated S-parameters converged after '
+                          f'{t[n - 1] * 1e12:.1f} ps, stopping openEMS', flush=True)
+                    self._stop_openEMS()
+                    return
         except Exception as ex:      # the monitor must never break the simulation itself
             self.error = repr(ex)
             print('[resonance_estimation] Monitor stopped after an error, openEMS continues to its '
@@ -413,8 +477,9 @@ class Monitor(threading.Thread):
 
 
 def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
-    """After openEMS has finished one excitation: extrapolate the complete record, check it, and write the
-    extended signals to <excitation folder>/resonance_estimation/. Writes a log in the excitation folder."""
+    """After openEMS has finished one excitation: extrapolate the complete record, check it
+    (final_extrapolation()), and write the extended signals to <excitation folder>/resonance_estimation/.
+    Writes a log in the excitation folder."""
     z0 = read_port_information(sim_path)
     ports = sorted(z0)
     excited = excite_portnumbers[0]
@@ -439,30 +504,12 @@ def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
         if n <= 3 * LAG + 10:
             raise RuntimeError('record too short to extrapolate')
         freqs, band = _band(te, e, t[1] - t[0])
-        method = choose_method(truncate(sig, n - LAG), te, e)   # same method for both extrapolations
-        info = {}
-        ext = extrapolate(truncate(sig, n), te, e, info, method=method)
-        ext_lag = extrapolate(truncate(sig, n - LAG), te, e, method=method)
-        if ext is None or ext_lag is None:
-            raise RuntimeError('record too short to extrapolate')
-        change = abs(_column(ext, excited, z0, freqs, band) - _column(ext_lag, excited, z0, freqs, band)).max()
-        tau = -info['dt'] / np.log(abs(info['poles']))
-        log += [f'Recorded until {t[n - 1] * 1e12:.1f} ps, {info.get("free_samples", 0)} samples after the excitation',
-                f'Method: {info["method"]}, {info["order"]} poles, slowest time constant {tau.max() * 1e12:.1f} ps',
-                f'Change against the extrapolation {LAG} samples earlier: {change:.1e} (limit {SELF_CHECK:.0e})']
-        if change <= SELF_CHECK:
+        ext, lines = final_extrapolation(sig, te, e, excited, z0, freqs, band,
+                                         monitor.converged_ext if stopped_early else None)
+        log += lines
+        if ext is not None:
             _write_extended(excitation_path, ext, sig)
             ok = True
-            log.append('Extended signals written to ' + RESULT_FOLDER + '/, used for the S-parameters')
-        elif stopped_early and monitor.converged_ext is not None:
-            # the record ends early because the monitor stopped openEMS: the original data alone would
-            # be truncated, so use the extrapolation that met the stop rule
-            _write_extended(excitation_path, monitor.converged_ext, sig)
-            ok = True
-            log.append('Final extrapolation not stable; the extrapolation that met the stop rule is written to '
-                       + RESULT_FOLDER + '/ and used for the S-parameters')
-        else:
-            log.append('Result not trusted: S-parameters are calculated from the original openEMS data')
     except Exception as ex:
         log.append(f'Resonance estimation not applied ({ex}): S-parameters are calculated from the '
                    'original openEMS data')
