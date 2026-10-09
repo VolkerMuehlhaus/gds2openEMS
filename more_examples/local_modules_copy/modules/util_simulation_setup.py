@@ -808,6 +808,17 @@ class CaseInsensitiveSettings (MutableMapping):
         return len(self.settings)
 
 
+_printed_once = set()   # messages that are the same for every port excitation of a model run
+
+
+def _print_once (message):
+    # Model scripts call setupSimulation() and runSimulation() once per port excitation; messages that
+    # don't change between excitations are only printed the first time
+    if message not in _printed_once:
+        _printed_once.add(message)
+        print(message)
+
+
 def _case_insensitive (settings):
     # settings[] keys are case-insensitive, see CaseInsensitiveSettings
     return None if settings is None else CaseInsensitiveSettings(settings)
@@ -843,7 +854,7 @@ def setupSimulation (excite_portnumbers=None,
 
     if dielectrics_list is None:
         if settings is not None:
-            print('Getting simulation settings from "settings" dictionary')
+            _print_once('Getting simulation settings from "settings" dictionary')
             # This is option 2, everything is inside the settings dict and we need to get it from there
             excite_portnumbers = settings['excite_portnumbers']
             simulation_ports   = settings['simulation_ports']
@@ -943,9 +954,10 @@ def setupSimulation (excite_portnumbers=None,
     if field_dumps is not False:
         addFielddumps_to_CSX (FDTD, CSX, field_dumps, allpolygons, metals_list)
 
-    # display mesh information (line count and smallest mesh cells)
+    # display mesh information (line count and smallest mesh cells), once per model: the mesh is created
+    # again for every port excitation, but is the same
     meshinfo = util_meshlines.get_mesh_information(mesh)
-    print(meshinfo)
+    _print_once(meshinfo)
 
     return FDTD
 
@@ -971,7 +983,7 @@ def runSimulation (excite_portnumbers=None,
 
     if excite_portnumbers is None:
         if settings is not None:
-            print('Getting simulation settings from "settings" dictionary')
+            _print_once('Getting simulation settings from "settings" dictionary')
             # This is option 2, everything is inside the settings dict and we need to get it from there
             excite_portnumbers = settings['excite_portnumbers']
             sim_path           = settings['sim_path']
@@ -1004,7 +1016,7 @@ def runSimulation (excite_portnumbers=None,
     # Write JSON with port information to simulation data directory, used for external de-embedding
     # This might be called multiple times if there are multiple excitations, but never mind ...
     port_information_file = os.path.join(sim_path, 'port_information.json')
-    print('Creating port information metadata file ', port_information_file)
+    _print_once('Creating port information metadata file ' + port_information_file)
     all_port_information_struct['name'] = model_basename 
     with open(port_information_file, 'w', encoding='utf-8') as f:
         json.dump(all_port_information_struct, f, ensure_ascii=False, indent=4)
@@ -1077,6 +1089,9 @@ def runSimulation (excite_portnumbers=None,
                         monitor.start()
                 try:
                     start = time.perf_counter()
+                    # Python buffers its output when it is not a terminal (e.g. in a log window), openEMS
+                    # does not: flush, so that the messages appear in the right order
+                    sys.stdout.flush()
                     FDTD.Run(excitation_path, numThreads=numThreads)  # BE CAREFUL WITH COMMAND LINE OPTIONS HERE! Some openEMS releases will fail for repeated runs with multiple excitations.
                     end = time.perf_counter()
                     if resonance_estimation:
@@ -1088,7 +1103,7 @@ def runSimulation (excite_portnumbers=None,
                         _resonance_estimation.finalize(sim_path, excitation_path, excite_portnumbers, monitor)
                     run_time_seconds = int(end-start)
 
-                    print('FDTD simulation completed successfully for excitation ', str(excite_portnumbers))
+                    print('FDTD simulation completed successfully for excitation ', str(excite_portnumbers), flush=True)
                     # Now that simulation created output data, write the hash of the underlying model. This will help to identify existing data for this model.
                     write_hash_to_data_folder(excitation_path, model_hash)
                 except AssertionError as e:
