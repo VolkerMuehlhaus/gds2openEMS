@@ -25,6 +25,7 @@ import socket
 import inspect
 
 from . import util_utilities as utilities
+from . import util_resonance_estimation as _resonance_estimation   # name differs from the runSimulation() option
 from . import util_meshlines
 from .util_stackup_reader import PEC_MATERIAL_NAME
 
@@ -958,6 +959,7 @@ def runSimulation (excite_portnumbers=None,
                    force_simulation=False,
                    no_gui = False,
                    numThreads=None,
+                   resonance_estimation=False,
                    settings=None):
     # This function runs the actual simulation in openEMS
 
@@ -979,6 +981,7 @@ def runSimulation (excite_portnumbers=None,
             force_simulation   = settings.get('force_simulation', False)
             no_gui             = settings.get('no_gui', False)
             numThreads         = settings.get('numThreads', 0)
+            resonance_estimation = settings.get('resonance_estimation', False)
         else:
             print('If positional parameters are not defined in setupSimulation, you must provide valid "settings" dictionary instead')                
             exit(1)
@@ -1055,10 +1058,34 @@ def runSimulation (excite_portnumbers=None,
             if model_changed:
                 # Hash is different or not found, or simulation is forced
                 print('Starting FDTD simulation for excitation ', str(excite_portnumbers))
+                # extended signals from an earlier run would otherwise be used for the new data
+                _resonance_estimation.remove_results(excitation_path)
+                monitor = None
+                if resonance_estimation:
+                    # stops openEMS once the extrapolated S-parameters have converged, see util_resonance_estimation
+                    if hasattr(FDTD, 'SetAbort'):
+                        FDTD.SetAbort(False)   # same FDTD object for all excitations: reset an earlier stop
+                    with open(CSX_file, 'r') as f:
+                        has_dumps = '<DumpBox' in f.read()
+                    if has_dumps:
+                        # field dumps and nf2ff collect their data during the run: stopping early would
+                        # truncate them, so only the port signals are extended after the run
+                        print('[resonance_estimation] Model has field dumps or nf2ff: openEMS runs to its '
+                              'energy limit, only the port signals are extended afterwards')
+                    else:
+                        monitor = _resonance_estimation.Monitor(FDTD, sim_path, excitation_path, excite_portnumbers)
+                        monitor.start()
                 try:
                     start = time.perf_counter()
                     FDTD.Run(excitation_path, numThreads=numThreads)  # BE CAREFUL WITH COMMAND LINE OPTIONS HERE! Some openEMS releases will fail for repeated runs with multiple excitations.
                     end = time.perf_counter()
+                    if resonance_estimation:
+                        if monitor is not None:
+                            monitor.finish()
+                        abort_file = os.path.join(excitation_path, 'ABORT')
+                        if os.path.exists(abort_file):
+                            os.remove(abort_file)
+                        _resonance_estimation.finalize(sim_path, excitation_path, excite_portnumbers, monitor)
                     run_time_seconds = int(end-start)
 
                     print('FDTD simulation completed successfully for excitation ', str(excite_portnumbers))
@@ -1151,7 +1178,8 @@ def runOpenEMS (excite_ports, settings):
                                 model_basename, 
                                 preview_only, 
                                 False,
-                                numThreads = numThreads)        
+                                numThreads = numThreads,
+                                resonance_estimation = settings.get('resonance_estimation', False))        
     
 
         # Initialize an empty matrix for S-parameters

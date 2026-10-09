@@ -18,6 +18,8 @@
 
 import os, tempfile, platform, sys
 
+from . import util_resonance_estimation as resonance_estimation
+
 
 # ============================== filename and path  =================================
 
@@ -81,14 +83,18 @@ def calculate_Sij (i, j, f, sim_path, simulation_ports):
               f'excite_portnumbers, or its simulation has not been run yet. S{i}{j} is not available.')
         return None
 
+    # with settings['resonance_estimation'], the probe signals extended beyond the end of the openEMS
+    # run are in a subfolder, with the same file names as the openEMS data
+    data_path = resonance_estimation.result_path(excitation_path) or excitation_path
+
     try:
         CSX_port_i = simulation_ports.get_port_by_number(i).CSXport
-        CSX_port_i.CalcPort(excitation_path, f, simulation_ports.get_port_by_number(i).port_Z0)
+        CSX_port_i.CalcPort(data_path, f, simulation_ports.get_port_by_number(i).port_Z0)
         if i==j:
             Sij = CSX_port_i.uf_ref  / CSX_port_i.uf_inc
         else:
             CSX_port_j = simulation_ports.get_port_by_number(j).CSXport
-            CSX_port_j.CalcPort(excitation_path, f, simulation_ports.get_port_by_number(j).port_Z0)
+            CSX_port_j.CalcPort(data_path, f, simulation_ports.get_port_by_number(j).port_Z0)
             Sij = CSX_port_i.uf_ref  / CSX_port_j.uf_inc
 
         return Sij

@@ -256,6 +256,7 @@ list):
 | `fill_factor_correction` | `False` | Scale the conductivity of merged via arrays by their fill factor |
 | `air_around` | `0` | Extra air around the model in addition to `margin`, one value or 6 values |
 | `numThreads` | `0` (automatic) | Force the openEMS thread count |
+| `resonance_estimation` | `False` | Stop openEMS once the extrapolated S-parameters have converged (`energy_limit` stays the upper limit); see "Resonance estimation" in the user's guide |
 | `field_dumps` | none | An `all_field_dumps()` object, see "Field dumps" in the user's guide |
 | `easyMesh` | `False` | Use the easyMesh4openEMS mesher (separate package) |
 | `z_mesh_function` | `create_z_mesh` | `util_meshlines.create_z_mesh_legacy` reproduces the z mesh before 28-Sep-2026 |
