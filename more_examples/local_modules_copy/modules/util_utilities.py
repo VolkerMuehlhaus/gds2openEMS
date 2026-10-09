@@ -18,6 +18,8 @@
 
 import os, tempfile, platform, sys
 
+from . import util_resonance_estimation as resonance_estimation
+
 
 # ============================== filename and path  =================================
 
@@ -81,14 +83,18 @@ def calculate_Sij (i, j, f, sim_path, simulation_ports):
               f'excite_portnumbers, or its simulation has not been run yet. S{i}{j} is not available.')
         return None
 
+    # with settings['resonance_estimation'], the probe signals extended beyond the end of the openEMS
+    # run are in a subfolder, with the same file names as the openEMS data
+    data_path = resonance_estimation.result_path(excitation_path) or excitation_path
+
     try:
         CSX_port_i = simulation_ports.get_port_by_number(i).CSXport
-        CSX_port_i.CalcPort(excitation_path, f, simulation_ports.get_port_by_number(i).port_Z0)
+        CSX_port_i.CalcPort(data_path, f, simulation_ports.get_port_by_number(i).port_Z0)
         if i==j:
             Sij = CSX_port_i.uf_ref  / CSX_port_i.uf_inc
         else:
             CSX_port_j = simulation_ports.get_port_by_number(j).CSXport
-            CSX_port_j.CalcPort(excitation_path, f, simulation_ports.get_port_by_number(j).port_Z0)
+            CSX_port_j.CalcPort(data_path, f, simulation_ports.get_port_by_number(j).port_Z0)
             Sij = CSX_port_i.uf_ref  / CSX_port_j.uf_inc
 
         return Sij
@@ -300,11 +306,19 @@ def write_snp (Smatrix,f, filename, z0=50):
             if matrixsize==1:
                 #1-port data
                 line = line + f" {Smatrix[0,index].real:.6e} {Smatrix[0,index].imag:.6e}"
-            else:
-                # multiport data
+            elif matrixsize==2:
+                # 2-port data: one line in the order S11 S21 S12 S22 (Touchstone special case)
                 for j in range(0,matrixsize):
                     for i in range(0,matrixsize):
                         line = line + f" {Smatrix[i, j, index].real:.6e} {Smatrix[i, j, index].imag:.6e}"
+            else:
+                # 3 ports and more: matrix row-wise (S11 S12 S13 ...), each row on a new line, and
+                # at most 4 pairs per line, as required by the Touchstone 1.x format
+                rows = []
+                for i in range(0,matrixsize):
+                    pairs = [f" {Smatrix[i, j, index].real:.6e} {Smatrix[i, j, index].imag:.6e}" for j in range(0,matrixsize)]
+                    rows += [''.join(pairs[k:k+4]) for k in range(0, matrixsize, 4)]
+                line = line + ('\n' + ' ' * len(line)).join(rows)
 
             snp_file.write(line + '\n')
 
