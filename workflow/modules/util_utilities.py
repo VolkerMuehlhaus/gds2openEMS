@@ -300,11 +300,19 @@ def write_snp (Smatrix,f, filename, z0=50):
             if matrixsize==1:
                 #1-port data
                 line = line + f" {Smatrix[0,index].real:.6e} {Smatrix[0,index].imag:.6e}"
-            else:
-                # multiport data
+            elif matrixsize==2:
+                # 2-port data: one line in the order S11 S21 S12 S22 (Touchstone special case)
                 for j in range(0,matrixsize):
                     for i in range(0,matrixsize):
                         line = line + f" {Smatrix[i, j, index].real:.6e} {Smatrix[i, j, index].imag:.6e}"
+            else:
+                # 3 ports and more: matrix row-wise (S11 S12 S13 ...), each row on a new line, and
+                # at most 4 pairs per line, as required by the Touchstone 1.x format
+                rows = []
+                for i in range(0,matrixsize):
+                    pairs = [f" {Smatrix[i, j, index].real:.6e} {Smatrix[i, j, index].imag:.6e}" for j in range(0,matrixsize)]
+                    rows += [''.join(pairs[k:k+4]) for k in range(0, matrixsize, 4)]
+                line = line + ('\n' + ' ' * len(line)).join(rows)
 
             snp_file.write(line + '\n')
 

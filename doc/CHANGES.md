@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 09-Oct-2026
+
+Fixed `utilities.write_snp()` for models with 3 or more ports: the Touchstone files contained the transposed S-matrix (S11 S21 S31 … instead of S11 S12 S13 …), all on one line. The Touchstone format requires the matrix row by row for 3 and more ports, each row on a new line and at most 4 value pairs per line. Programs that read these files (e.g. scikit-rf, circuit simulators) therefore got S21 where S12 belongs. For reciprocal structures the difference is small (in the examples up to 0.015 at 350 GHz), but it is wrong in principle. 1-port and 2-port files are unchanged. To correct an existing 3+-port file, run the model script again: the simulation is skipped (unchanged model, see [the hash-based skip](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#re-running-a-model-the-hash-based-skip)) and the Touchstone file is written again from the existing data.
+
 ## 04-Oct-2026
 
 The PDF user's guide is now generated from the Markdown user's guide [`userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md`](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md), which is the only source from now on: `python doc/pdf_build/build_userguide_pdf.py`, see [`pdf_build/README.md`](pdf_build/README.md). A GitHub workflow builds the PDF when the guide changes and attaches it to each release.
