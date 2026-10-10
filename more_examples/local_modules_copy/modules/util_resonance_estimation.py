@@ -65,7 +65,8 @@ ORDERS = range(1, 13)
 SM_ITER = 5             # Steiglitz-McBride iterations for the ARX fit
 MP_MIN_SAMPLES = 30     # free-decay samples needed for the matrix pencil fit (20 was not always stable)
 FREE_DECAY_DB = -60     # the excitation is over when it is this far below its peak
-TAIL_REL = 1e-7         # extend the signals until the slowest pole has decayed to this level
+TAIL_REL = 1e-7         # extend the signals until the slowest pole has decayed to this level,
+MAX_TAIL_FACTOR = 20    #   but not longer than this many times the record (tail_check() rejects slower tails)
 NUM_FREQ = 201          # frequency points for the convergence check
 TAU_FACTOR = 3.0        # tail_check(): effective time constant of the tail at most this many times the
 MIN_RECORD_SAMPLES = 8  #   free decay recorded (at least this many samples), and the tail does not
@@ -218,9 +219,9 @@ def _run_arx(a, b, y, u, n_from, n_to):
     return x
 
 
-def _tail_length(poles, n_min):
+def _tail_length(poles, n_min, n_record):
     zmax = max(abs(poles).max(), 0.5) if len(poles) else 0.5
-    return int(min(max(np.log(TAIL_REL) / np.log(zmax), n_min), 50000))
+    return int(min(max(np.log(TAIL_REL) / np.log(zmax), n_min), MAX_TAIL_FACTOR * n_record))
 
 
 def _prepare(sig, te, e):
@@ -250,7 +251,7 @@ def _extrapolate_arx(sig, te, e, info):
         return None
     a, B = _fit_arx(Y, u, best[0])
     poles = np.roots(np.r_[1.0, -a])
-    n_to = Ns.max() + _tail_length(poles, 10)
+    n_to = Ns.max() + _tail_length(poles, 10, Ns.max())
     X = [_run_arx(a, b, y, u, len(y), n_to) * s for b, y, s in zip(B, Y, scale)]
     info.update(method='known-input fit (ARX)', order=best[0], poles=poles, dt=dt)
     return _rebuild(sig, keys, X, dt)
@@ -272,7 +273,7 @@ def _extrapolate_mp(sig, te, e, info, sv_tol=1e-5):
     V = Vh[:M].conj().T
     z = np.linalg.eigvals(np.linalg.pinv(V[:-1]) @ V[1:])
     z = np.where(abs(z) >= 1, 1 / np.conj(z), z)
-    n_to = Ns.max() + _tail_length(z, 10)
+    n_to = Ns.max() + _tail_length(z, 10, Ns.max())
     X = []
     for y, s in zip(Y, scale):
         n = np.arange(len(y) - n0)
@@ -367,18 +368,26 @@ def _band(te, e, dt):
     return freqs, E > 0.01 * E.max()
 
 
-def convergence_check(sig, n, te, e, excited, z0, freqs, band):
+def convergence_check(sig, n, te, e, excited, z0, freqs, band, cache=None):
     """The stop rule, applied to the first n samples of a growing record: extrapolations from n, n-LAG and
     n-2*LAG samples (one method, chosen from the shortest record) agree within TOLERANCE, and the newest
-    one passes tail_check(). Returns (converged, change, extrapolation from n samples)."""
+    one passes tail_check(). cache: optional dict, keeps extrapolations by (record length, method), so that
+    checking every new sample needs only one new extrapolation per sample.
+    Returns (converged, change, extrapolation from n samples)."""
     method = choose_method(truncate(sig, n - 2 * LAG), te, e)
     exts, cols = [], []
     for m in (n, n - LAG, n - 2 * LAG):
-        ext = extrapolate(truncate(sig, m), te, e, method=method)
-        if ext is None:
-            return False, np.inf, None
+        if cache is not None and (m, method) in cache:
+            ext, col = cache[(m, method)]
+        else:
+            ext = extrapolate(truncate(sig, m), te, e, method=method)
+            if ext is None:
+                return False, np.inf, None
+            col = _column(ext, excited, z0, freqs, band)
+            if cache is not None:
+                cache[(m, method)] = (ext, col)
         exts.append(ext)
-        cols.append(_column(ext, excited, z0, freqs, band))
+        cols.append(col)
     change = max(abs(cols[0] - cols[1]).max(), abs(cols[1] - cols[2]).max())
     converged = change < TOLERANCE and tail_check(truncate(sig, n), exts[0], te, e)[0]
     return converged, change, exts[0]
@@ -434,6 +443,7 @@ class Monitor(threading.Thread):
             self.ports = sorted(self.z0)
             exc = None
             last_n = 0
+            cache = {}
             while not self.done.wait(CHECK_INTERVAL):
                 if exc is None:
                     exc = read_excitation(self.excitation_path)
@@ -447,19 +457,28 @@ class Monitor(threading.Thread):
                     continue
                 n = min(len(t) for t, _ in sig.values())
                 t = next(iter(sig.values()))[0]
-                if t[n - 1] < t_free or n - last_n < LAG or n < 3 * LAG + 10:
+                if t[n - 1] < t_free or n < 3 * LAG + 10:
                     continue
                 if freqs is None:
                     freqs, band = _band(te, e, t[1] - t[0])
+                # openEMS writes the probe files only every few seconds: check every sample that arrived since
+                # the last check, the stop rule can be met at single samples only
+                first = max(last_n + 1, int(np.searchsorted(t, t_free)) + 1, 3 * LAG + 10)
                 last_n = n
-                converged, change, ext = convergence_check(sig, n, te, e, self.excited, self.z0, freqs, band)
-                if converged:
-                    self.converged_ext = ext
-                    self.stop_reason = f'converged after {t[n - 1] * 1e12:.1f} ps (change {change:.1e})'
-                    print(f'[resonance_estimation] Extrapolated S-parameters converged after '
-                          f'{t[n - 1] * 1e12:.1f} ps, stopping openEMS', flush=True)
-                    self._stop_openEMS()
-                    return
+                for k in range(first, n + 1):
+                    if self.done.is_set():
+                        return
+                    converged, change, ext = convergence_check(sig, k, te, e, self.excited, self.z0, freqs, band,
+                                                               cache)
+                    for key in [key for key in cache if key[0] < k - 2 * LAG]:
+                        del cache[key]
+                    if converged:
+                        self.converged_ext = ext
+                        self.stop_reason = f'converged after {t[k - 1] * 1e12:.1f} ps (change {change:.1e})'
+                        print(f'[resonance_estimation] Extrapolated S-parameters converged after '
+                              f'{t[k - 1] * 1e12:.1f} ps, stopping openEMS', flush=True)
+                        self._stop_openEMS()
+                        return
         except Exception as ex:      # the monitor must never break the simulation itself
             self.error = repr(ex)
             print('[resonance_estimation] Monitor stopped after an error, openEMS continues to its '
