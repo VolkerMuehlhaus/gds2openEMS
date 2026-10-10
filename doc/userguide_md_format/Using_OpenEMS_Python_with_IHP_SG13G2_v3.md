@@ -30,6 +30,7 @@ Document version: 2026-09-02 (v3)
 [Port parasitics and de-embedding](#port-parasitics-and-de-embedding)
 [Advanced topics](#advanced-topics)
 &ensp;[Forcing the solver thread count](#forcing-the-solver-thread-count)
+&ensp;[Resonance estimation: stop when the result has converged](#resonance-estimation-stop-when-the-result-has-converged)
 &ensp;[Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems)
 &ensp;[Overriding XML stackup `<Variable>` from the model code](#overriding-xml-stackup-variable-from-the-model-code)
 [Examples](#examples)
@@ -57,6 +58,8 @@ This chapter gives a brief overview of major changes since the previous edition 
 - Port de-embedding script `scripts/deembed_openEMS.py` is a "quick & dirty" solution to estimate and remove lumped port's parasitic inductance, see [Port parasitics and de-embedding](#port-parasitics-and-de-embedding).
 
 - `numThreads` setting to **force the solver thread count** to a fixed value, instead of relying on automatic detection.
+
+- **Resonance estimation** (`settings['resonance_estimation']`): openEMS stops when the extrapolated S-parameters have converged, instead of at a fixed `energy_limit`, see [Resonance estimation](#resonance-estimation-stop-when-the-result-has-converged).
 
 ## About this workflow
 
@@ -296,6 +299,7 @@ Settings keys are case-insensitive: `settings['numthreads']` works like `setting
 | `settings['fill_factor_correction']` | `False` | Scale the conductivity of merged via arrays by their via fill factor — see [Input files](#input-files) |
 | `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` |
 | `settings['numThreads']` | automatic | Force the openEMS solver thread count — see [Forcing the solver thread count](#forcing-the-solver-thread-count) |
+| `settings['resonance_estimation']` | `False` | Stop openEMS when the extrapolated S-parameters have converged; `energy_limit` stays the upper limit — see [Resonance estimation](#resonance-estimation-stop-when-the-result-has-converged) |
 | `settings['easyMesh']` | `False` | Use the easyMesh4openEMS automatic mesh generator instead of the built-in one — see [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems) |
 | `settings['field_dumps']` | none | A `simulation_setup.all_field_dumps()` object — see [Field dumps](#field-dumps) |
 
@@ -392,6 +396,25 @@ settings['numThreads'] = 8   # 0 (or omitted) = automatic detection
 
 See `more_examples/numThreads/` for complete examples in both the `settings{}` and loose-variable styles.
 
+### Resonance estimation: stop when the result has converged
+
+With `energy_limit`, openEMS stops when the energy in the model has decayed by that amount. The right value depends on the model. At −40 dB, a slow decay can be cut off, for example the L/R tail of an inductor or a time constant of the substrate. The S-parameters then get a truncation error, largest at low frequency: for an inductor, the low-frequency series resistance can be 25 % too low. At −60 dB, many models run longer than they need.
+
+`settings['resonance_estimation'] = True` checks the result instead of the energy. While openEMS runs, the port voltages and currents are extrapolated beyond the current time, similar to the "AR filter" in CST or "resonance estimation" in Empire XPU, and openEMS is stopped as soon as the extrapolated S-parameters no longer change. The S-parameters are then calculated from the extrapolated signals.
+
+```python
+settings['energy_limit'] = -60            # upper limit: openEMS stops here at the latest
+settings['resonance_estimation'] = True   # stop earlier, once the extrapolated S-parameters have converged
+```
+
+In tests with six models (three inductors, a MIM capacitor, two PA core layouts up to 350 GHz), the runs stopped after 0.45–0.85× the time of a −60 dB run. Against a −90 dB reference run, the S-parameters differed by at most 9·10⁻⁵ to 1.5·10⁻³ (max |ΔS|), depending on the model. For the inductors and the MIM capacitor, this was as accurate as or more accurate than a plain −60 dB run. The example [`more_examples/resonance_estimation`](../../more_examples/resonance_estimation/README.md) shows the problem and the results step by step.
+
+- `energy_limit` stays the upper limit. If the extrapolation has not converged by then, openEMS stops there as usual, and the port signals are still extended afterwards if the result passes a self-check.
+- When resonance estimation stops openEMS, openEMS reports "Max. number of timesteps was reached before the end-criteria … was reached". That refers to this stop; no timestep limit was hit. The log file (below) states the reason.
+- Each port excitation writes `resonance_estimation.txt` into its `sub-N` folder: why openEMS stopped, which fit was used, the slowest time constant found, and whether the extended signals are used. The extended signals are in `sub-N/resonance_estimation/`; the original openEMS data is not changed. `utilities.calculate_Sij()`, and the Y and Z functions based on it, use the extended signals automatically.
+- With field dumps or nf2ff boxes in the model, openEMS is not stopped early, because these collect their data during the run and would be cut off. The port signals are still extended after the run.
+- Changing the setting changes the model hash, so the model is simulated again (see [the hash-based skip](#re-running-a-model-the-hash-based-skip)).
+
 ### Automatic meshing with easyMesh4openEMS
 
 `more_examples/easyMesh/openEMS_generic_nport_MA.py` demonstrates [easyMesh4openEMS](https://github.com/MustafaAlchalabi/easyMesh4openEMS), an alternative automatic mesh-line placement engine, enabled via:
@@ -455,7 +478,7 @@ All examples read GDSII + XML stackup and write a Touchstone S-parameter file (e
 
 **"Warning: Unused primitive (type: LinPoly) detected in property ..."**: These messages pop up when openEMS solver detects a layout with multiple touching metals on the same layer and same priority. It is purely cosmetic in this workflow and can be safely ignored.
 
-**Why is my simulation slow?** FDTD simulation time scales with mesh cell count and the number of time steps needed to reach `energy_limit`. Absorbing boundaries (`MUR`, and especially `PML_8`) and structures with high-Q resonances both increase the number of time steps needed. Check the mesh cell count reported at the start of the run, and whether `refined_cellsize` is finer than actually needed everywhere, not just at the features that need it.
+**Why is my simulation slow?** FDTD simulation time scales with mesh cell count and the number of time steps needed to reach `energy_limit`. Absorbing boundaries (`MUR`, and especially `PML_8`) and structures with high-Q resonances both increase the number of time steps needed. Check the mesh cell count reported at the start of the run, and whether `refined_cellsize` is finer than actually needed everywhere, not just at the features that need it. [Resonance estimation](#resonance-estimation-stop-when-the-result-has-converged) stops the run once the result has converged, instead of waiting for `energy_limit`.
 
 **Can I reduce the stackup by removing the substrate for transmission-line models?** Yes, if a ground plane between the signal and the substrate effectively shields the fields from reaching it — `SG13G2_nosub.xml` is provided for exactly this case, and lets you use `PEC` boundaries instead of needing absorbing ones for the substrate side.
 
@@ -463,7 +486,7 @@ All examples read GDSII + XML stackup and write a Touchstone S-parameter file (e
 
 **My imported GDSII looks strange.** Check that you're reading the correct cell. The top-level cell is used by default; pass `cellname=` to `read_gds()` otherwise. Also check the correct `purposelist`, usually `[0]`. Holes and cutouts are handled automatically by the GDSII reader, see [Input files](#input-files). If geometry still looks wrong, check for self-intersecting or degenerate polygons in the source GDSII itself.
 
-**My results show a lot of ripple.** This is usually caused by one of two things. Either the simulation time is insufficient: `energy_limit` is not low enough, so the time-domain signal hasn't fully decayed before the FFT is taken. Or there are reflections from an under-sized simulation boundary: too little `margin`/`air_around`, or a boundary condition that doesn't match the physics, for example a `PEC` box where an absorbing boundary was needed.
+**My results show a lot of ripple.** This is usually caused by one of two things. Either the simulation time is insufficient: `energy_limit` is not low enough, so the time-domain signal hasn't fully decayed before the FFT is taken (lower `energy_limit`, or use [resonance estimation](#resonance-estimation-stop-when-the-result-has-converged)). Or there are reflections from an under-sized simulation boundary: too little `margin`/`air_around`, or a boundary condition that doesn't match the physics, for example a `PEC` box where an absorbing boundary was needed.
 
 **Where do I change the view style in AppCSXCAD's 3D viewer?** Use the viewer's own menus (Tools > Visibility, and the object tree) to select which geometry groups are shown — this is the same viewer used throughout this guide's screenshots.
 

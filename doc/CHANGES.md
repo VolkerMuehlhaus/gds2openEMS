@@ -2,6 +2,27 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 10-Oct-2026
+
+New option `settings['resonance_estimation']`: shorter simulations with accurate low-frequency results.
+
+openEMS ends a simulation when the energy left in the model has dropped below `energy_limit`. With the usual −40 dB, this can be too early for inductors and capacitors, and their low-frequency values come out wrong: for example, an inductor's low-frequency resistance 20 % too low. −60 dB gives the right result, but takes longer. With resonance estimation, gds2openEMS predicts how the simulation would continue, ends it as soon as the predicted result no longer changes, and includes the prediction in the result.
+
+```python
+settings['energy_limit'] = -60            # the simulation ends here at the latest
+settings['resonance_estimation'] = True   # end earlier, once the result no longer changes
+```
+
+- In tests with inductors, a MIM capacitor and PA core layouts, the simulations took 0.45–0.85× as long as with −60 dB alone. For the inductors and the capacitor, the results were as accurate as with −60 dB or better.
+- Layouts that are already accurate at −40 dB, such as transistor and PA core layouts, end right after the excitation, with about −40 dB accuracy.
+- If the prediction is not reliable, the simulation continues, or the normal result is used. The file `resonance_estimation.txt` in each `sub-N` output folder says what happened.
+- Models with field dumps are not ended early.
+- The option is off by default; without it, nothing changes.
+
+See [Resonance estimation](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#resonance-estimation-stop-when-the-result-has-converged) in the user's guide, and the example [`more_examples/resonance_estimation`](../more_examples/resonance_estimation/README.md), which shows the problem and the results step by step.
+
+Fixed `utilities.write_snp()` for models with 3 or more ports: the Touchstone files contained the transposed S-matrix (S11 S21 S31 … instead of S11 S12 S13 …), all on one line. The Touchstone format requires the matrix row by row for 3 and more ports, each row on a new line and at most 4 value pairs per line. Programs that read these files (e.g. scikit-rf, circuit simulators) therefore got S21 where S12 belongs. For reciprocal structures the difference is small (in the examples up to 0.015 at 350 GHz), but it is wrong in principle. 1-port and 2-port files are unchanged. To correct an existing 3+-port file, run the model script again: the simulation is skipped (unchanged model, see [the hash-based skip](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#re-running-a-model-the-hash-based-skip)) and the Touchstone file is written again from the existing data.
+
 ## 04-Oct-2026
 
 The PDF user's guide is now generated from the Markdown user's guide [`userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md`](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md), which is the only source from now on: `python doc/pdf_build/build_userguide_pdf.py`, see [`pdf_build/README.md`](pdf_build/README.md). A GitHub workflow builds the PDF when the guide changes and attaches it to each release.

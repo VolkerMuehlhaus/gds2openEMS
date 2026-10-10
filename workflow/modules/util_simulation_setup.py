@@ -25,6 +25,7 @@ import socket
 import inspect
 
 from . import util_utilities as utilities
+from . import util_resonance_estimation as _resonance_estimation   # name differs from the runSimulation() option
 from . import util_meshlines
 from .util_stackup_reader import PEC_MATERIAL_NAME
 
@@ -807,6 +808,17 @@ class CaseInsensitiveSettings (MutableMapping):
         return len(self.settings)
 
 
+_printed_once = set()   # messages that are the same for every port excitation of a model run
+
+
+def _print_once (message):
+    # Model scripts call setupSimulation() and runSimulation() once per port excitation; messages that
+    # don't change between excitations are only printed the first time
+    if message not in _printed_once:
+        _printed_once.add(message)
+        print(message)
+
+
 def _case_insensitive (settings):
     # settings[] keys are case-insensitive, see CaseInsensitiveSettings
     return None if settings is None else CaseInsensitiveSettings(settings)
@@ -842,7 +854,7 @@ def setupSimulation (excite_portnumbers=None,
 
     if dielectrics_list is None:
         if settings is not None:
-            print('Getting simulation settings from "settings" dictionary')
+            _print_once('Getting simulation settings from "settings" dictionary')
             # This is option 2, everything is inside the settings dict and we need to get it from there
             excite_portnumbers = settings['excite_portnumbers']
             simulation_ports   = settings['simulation_ports']
@@ -942,9 +954,10 @@ def setupSimulation (excite_portnumbers=None,
     if field_dumps is not False:
         addFielddumps_to_CSX (FDTD, CSX, field_dumps, allpolygons, metals_list)
 
-    # display mesh information (line count and smallest mesh cells)
+    # display mesh information (line count and smallest mesh cells), once per model: the mesh is created
+    # again for every port excitation, but is the same
     meshinfo = util_meshlines.get_mesh_information(mesh)
-    print(meshinfo)
+    _print_once(meshinfo)
 
     return FDTD
 
@@ -958,6 +971,7 @@ def runSimulation (excite_portnumbers=None,
                    force_simulation=False,
                    no_gui = False,
                    numThreads=None,
+                   resonance_estimation=False,
                    settings=None):
     # This function runs the actual simulation in openEMS
 
@@ -969,7 +983,7 @@ def runSimulation (excite_portnumbers=None,
 
     if excite_portnumbers is None:
         if settings is not None:
-            print('Getting simulation settings from "settings" dictionary')
+            _print_once('Getting simulation settings from "settings" dictionary')
             # This is option 2, everything is inside the settings dict and we need to get it from there
             excite_portnumbers = settings['excite_portnumbers']
             sim_path           = settings['sim_path']
@@ -979,6 +993,7 @@ def runSimulation (excite_portnumbers=None,
             force_simulation   = settings.get('force_simulation', False)
             no_gui             = settings.get('no_gui', False)
             numThreads         = settings.get('numThreads', 0)
+            resonance_estimation = settings.get('resonance_estimation', False)
         else:
             print('If positional parameters are not defined in setupSimulation, you must provide valid "settings" dictionary instead')                
             exit(1)
@@ -1001,7 +1016,7 @@ def runSimulation (excite_portnumbers=None,
     # Write JSON with port information to simulation data directory, used for external de-embedding
     # This might be called multiple times if there are multiple excitations, but never mind ...
     port_information_file = os.path.join(sim_path, 'port_information.json')
-    print('Creating port information metadata file ', port_information_file)
+    _print_once('Creating port information metadata file ' + port_information_file)
     all_port_information_struct['name'] = model_basename 
     with open(port_information_file, 'w', encoding='utf-8') as f:
         json.dump(all_port_information_struct, f, ensure_ascii=False, indent=4)
@@ -1055,13 +1070,40 @@ def runSimulation (excite_portnumbers=None,
             if model_changed:
                 # Hash is different or not found, or simulation is forced
                 print('Starting FDTD simulation for excitation ', str(excite_portnumbers))
+                # extended signals from an earlier run would otherwise be used for the new data
+                _resonance_estimation.remove_results(excitation_path)
+                monitor = None
+                if resonance_estimation:
+                    # stops openEMS once the extrapolated S-parameters have converged, see util_resonance_estimation
+                    if hasattr(FDTD, 'SetAbort'):
+                        FDTD.SetAbort(False)   # same FDTD object for all excitations: reset an earlier stop
+                    with open(CSX_file, 'r') as f:
+                        has_dumps = '<DumpBox' in f.read()
+                    if has_dumps:
+                        # field dumps and nf2ff collect their data during the run: stopping early would
+                        # truncate them, so only the port signals are extended after the run
+                        print('[resonance_estimation] Model has field dumps or nf2ff: openEMS runs to its '
+                              'energy limit, only the port signals are extended afterwards')
+                    else:
+                        monitor = _resonance_estimation.Monitor(FDTD, sim_path, excitation_path, excite_portnumbers)
+                        monitor.start()
                 try:
                     start = time.perf_counter()
+                    # Python buffers its output when it is not a terminal (e.g. in a log window), openEMS
+                    # does not: flush, so that the messages appear in the right order
+                    sys.stdout.flush()
                     FDTD.Run(excitation_path, numThreads=numThreads)  # BE CAREFUL WITH COMMAND LINE OPTIONS HERE! Some openEMS releases will fail for repeated runs with multiple excitations.
                     end = time.perf_counter()
+                    if resonance_estimation:
+                        if monitor is not None:
+                            monitor.finish()
+                        abort_file = os.path.join(excitation_path, 'ABORT')
+                        if os.path.exists(abort_file):
+                            os.remove(abort_file)
+                        _resonance_estimation.finalize(sim_path, excitation_path, excite_portnumbers, monitor)
                     run_time_seconds = int(end-start)
 
-                    print('FDTD simulation completed successfully for excitation ', str(excite_portnumbers))
+                    print('FDTD simulation completed successfully for excitation ', str(excite_portnumbers), flush=True)
                     # Now that simulation created output data, write the hash of the underlying model. This will help to identify existing data for this model.
                     write_hash_to_data_folder(excitation_path, model_hash)
                 except AssertionError as e:
@@ -1151,7 +1193,8 @@ def runOpenEMS (excite_ports, settings):
                                 model_basename, 
                                 preview_only, 
                                 False,
-                                numThreads = numThreads)        
+                                numThreads = numThreads,
+                                resonance_estimation = settings.get('resonance_estimation', False))        
     
 
         # Initialize an empty matrix for S-parameters
