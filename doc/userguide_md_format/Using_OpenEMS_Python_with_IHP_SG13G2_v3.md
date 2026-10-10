@@ -407,7 +407,7 @@ settings['energy_limit'] = -60            # upper limit: openEMS stops here at t
 settings['resonance_estimation'] = True   # stop earlier, once the extrapolated S-parameters have converged
 ```
 
-In tests with six models (three inductors, a MIM capacitor, two PA core layouts up to 350 GHz), the runs stopped after 0.4–0.8× the time of a −60 dB run. Against a −90 dB reference run, the S-parameters differed by at most 7·10⁻⁵ to 2·10⁻³ (max |ΔS|), depending on the model. For the inductors and the MIM capacitor, this was more accurate than a plain −60 dB run.
+In tests with six models (three inductors, a MIM capacitor, two PA core layouts up to 350 GHz), the runs stopped after 0.45–0.85× the time of a −60 dB run. Against a −90 dB reference run, the S-parameters differed by at most 9·10⁻⁵ to 1.5·10⁻³ (max |ΔS|), depending on the model. For the inductors and the MIM capacitor, this was as accurate as or more accurate than a plain −60 dB run. The example [`more_examples/resonance_estimation`](../../more_examples/resonance_estimation/README.md) shows the problem and the results step by step.
 
 - `energy_limit` stays the upper limit. If the extrapolation has not converged by then, openEMS stops there as usual, and the port signals are still extended afterwards if the result passes a self-check.
 - When resonance estimation stops openEMS, openEMS reports "Max. number of timesteps was reached before the end-criteria … was reached". That refers to this stop; no timestep limit was hit. The log file (below) states the reason.
