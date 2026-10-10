@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 10-Oct-2026
+
+`settings['resonance_estimation']`: the monitor now checks the stop rule at every probe sample recorded since its last check, not only at the newest one, so a convergence that holds only for a few samples is no longer missed. Extrapolations are cached between checks, and the extrapolated tail is limited to 20× the recorded length, which keeps each check below about 1 s. On a 6-port PA core (−60 dB energy limit) all excitations now stop early, and the total run time dropped from 0.71× to 0.61× of the run without resonance estimation, with the same accuracy.
+
 ## 09-Oct-2026
 
 New option `settings['resonance_estimation'] = True`: openEMS stops once the S-parameters, extrapolated from the port signals recorded so far, no longer change, instead of waiting for `energy_limit` (which stays the upper limit). The port signals are extended beyond the end of the run, similar to the "AR filter" in CST or "resonance estimation" in Empire XPU, and `utilities.calculate_Sij()` uses the extended signals. In tests with six models (inductors, a MIM capacitor, PA core layouts up to 350 GHz), the runs stopped after 0.4–0.8× the time of a −60 dB run, with S-parameters within 7·10⁻⁵ to 2·10⁻³ of a −90 dB reference run. With field dumps or nf2ff in the model, openEMS is not stopped early. Every extrapolation must pass a plausibility check of its tail: it must not grow, and its effective time constant must not exceed 3× the free decay recorded; otherwise openEMS keeps running, or after the run the extrapolation is not used. See [Resonance estimation](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#resonance-estimation-stop-when-the-result-has-converged) in the user's guide. The option is off by default; without it, nothing changes.
