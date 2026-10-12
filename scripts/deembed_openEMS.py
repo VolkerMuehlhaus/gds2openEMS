@@ -28,6 +28,7 @@
 
 import os, json, math
 import skrf as rf
+from skrf.circuit import Circuit
 import argparse
 
 
@@ -58,27 +59,33 @@ def port_deembedding (snp_filename, port_info_available, port_info_data):
                 # store into dict for this port number, just in case the port numbers in the file are in wrong sorting order
                 Lport[str(portnum)]=L
 
-        # convert the dict with port L into a list, to have the final values in correct order
-        L_values = []
-        for key in Lport.keys():
-            L_values.append(-Lport[key])
-
-        # load SnP data and apply negative series L at each port        
+        # load SnP data and apply negative series L at each port
         ntwk  = rf.Network(snp_filename)
         freq = ntwk.frequency
+        N = ntwk.nports
 
         # Create a Media object (needed for Media.inductor)
         media = rf.media.DefinedGammaZ0(frequency=freq, z0=50)
 
-        for n,L in enumerate(L_values):
-            print(f'Cascading L= {L*1e12:.2f} pH at port {n+1}')
-            # series inductor
-            inductor = media.inductor(L=L)
-            # cascade with the main network 
-            # due to internal renumbering the new port always appears at the end
-            # after iterating over all ports we have the correct order again
-            ntwk = rf.connect(inductor, 0, ntwk, 0)
-
+        # Build the de-embedding circuit with explicit, named connections:
+        # external port n -- series L of port n -- DUT port n
+        # Chaining skrf connect() instead renumbers the remaining ports on every call, which is easy
+        # to get wrong (it put all L values at port 1 before). The L values are looked up by port
+        # number, a port without geometry data is connected directly (L = 0).
+        dut = ntwk.copy()
+        dut.name = 'dut'
+        connections = []
+        for n in range(N):
+            if str(n+1) in Lport:
+                L = -Lport[str(n+1)]
+                print(f'Cascading L= {L*1e12:.2f} pH at port {n+1}')
+            else:
+                L = 0.0
+                print(f'No geometry data for port {n+1}, port not de-embedded')
+            inductor = media.inductor(L=L, name=f'L{n+1}')
+            port = Circuit.Port(freq, name=f'P{n+1}', z0=dut.z0[:, n])
+            connections += [[(port, 0), (inductor, 0)], [(inductor, 1), (dut, n)]]
+        ntwk = Circuit(connections).network
 
         filename, file_extension = os.path.splitext(snp_filename)
         out_filename = filename + '_deembedded' # without extension
