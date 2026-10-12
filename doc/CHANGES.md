@@ -2,6 +2,10 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 12-Oct-2026
+
+**Bugfix:** port de-embedding in `scripts/deembed_openEMS.py` put the negative inductance of all ports in series at port 1, and the other ports were not de-embedded. For a 3-port, port 1 got the sum of all three values. Now each port gets the value for its own port number; a port without geometry data in `port_information.json` is not de-embedded. The raw `.sNp` files were not affected. De-embedded files created with earlier versions should be created again by running `deembed_openEMS.py` again. The same bug was fixed in gds2palace, where Gianluca Simone and David Lurz (FAU) found it.
+
 ## 10-Oct-2026
 
 New option `settings['resonance_estimation']`: shorter simulations with accurate low-frequency results.
