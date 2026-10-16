@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView,
     QPushButton, QComboBox, QLineEdit, QPlainTextEdit, QLabel, QFileDialog, QMessageBox,
     QColorDialog, QMenuBar, QInputDialog, QCompleter, QStyledItemDelegate, QStyleFactory,
+    QFrame,
 )
 from PySide6.QtGui import (
     QColor, QFontMetrics, QKeySequence, QAction, QFontDatabase,
@@ -1057,7 +1058,7 @@ class StackupPreviewWindow(QWidget):
     deleteLater() on this window instead of relying on Qt object-tree cleanup.
     """
 
-    def __init__(self, vector_widget, parent=None, chiplet_switcher=None):
+    def __init__(self, vector_widget, parent=None, chiplet_switcher=None, show_errors_fn=None):
         super().__init__(parent, Qt.Window)
         self.setWindowTitle("Stackup Preview")
         self.resize(700, 900)
@@ -1072,12 +1073,41 @@ class StackupPreviewWindow(QWidget):
         if chiplet_switcher is not None:
             layout.addWidget(chiplet_switcher)
 
+        # "not up to date" banner, only shown while the editor's file is invalid -
+        # above the drawing rather than on it, so it doesn't hide the stackup being
+        # fixed. See set_stale_message().
+        self.stale_banner = QFrame()
+        self.stale_banner.setObjectName("staleBanner")
+        # explicit text color too, not just the background: an inherited dark-mode
+        # palette would otherwise give light text on this light background
+        self.stale_banner.setStyleSheet(
+            "#staleBanner { background-color: #fdecea; border: 1px solid #d20000; border-radius: 4px; }"
+            " #staleBanner QLabel { color: #8b0000; }")
+        banner_layout = QHBoxLayout(self.stale_banner)
+        banner_layout.setContentsMargins(8, 4, 8, 4)
+        self.stale_label = QLabel()
+        self.stale_label.setWordWrap(True)
+        banner_layout.addWidget(self.stale_label, 1)
+        self.show_errors_btn = QPushButton("Show errors")
+        if show_errors_fn is not None:
+            self.show_errors_btn.clicked.connect(show_errors_fn)
+        banner_layout.addWidget(self.show_errors_btn)
+        self.stale_banner.setVisible(False)
+        layout.addWidget(self.stale_banner)
+
         layout.addWidget(vector_widget)
         self.setLayout(layout)
 
     def closeEvent(self, event):
         event.ignore()
         self.hide()
+
+    def set_stale_message(self, text, show_errors_button=True):
+        """Shows the "not up to date" banner with text, or hides it for text None."""
+        self.stale_banner.setVisible(text is not None)
+        if text is not None:
+            self.stale_label.setText(text)
+            self.show_errors_btn.setVisible(show_errors_button)
 
 
 # ------------------------------------------------------------------
@@ -1121,6 +1151,13 @@ class StackupEditorWindow(QDialog):
         # for the same "new starting point, not an edit" reason undo state resets there.
         self._was_valid = True
         self._invalid_field = None
+        # True once the preview has drawn the current file at least once - while the
+        # file is invalid, that last good drawing is kept and marked stale; without
+        # one (e.g. a file that is invalid right from opening) the preview is cleared
+        # instead, rather than striking through the previous file's drawing. Reset in
+        # _reset_undo_baseline(), see _refresh_preview()
+        self._preview_drawn_for_file = False
+
 
         # full text behind the status line's "Details..." button - see
         # _refresh_validation_status()/_show_status_details()
@@ -1454,8 +1491,8 @@ class StackupEditorWindow(QDialog):
         status_row = QHBoxLayout()
         self.status_label = QLabel("")
         status_row.addWidget(self.status_label)
-        # only ever shown for the "N note(s)" case - errors already point at Save's own
-        # dialog ("see Save for details"), which shows the full error list on click
+        # only ever shown for the "N note(s)" case - errors already point at the XML
+        # Preview tab ("see XML Preview tab for details"), which lists every error
         self.status_details_btn = QPushButton("Details...")
         self.status_details_btn.setFlat(True)
         self.status_details_btn.setVisible(False)
@@ -1503,7 +1540,8 @@ class StackupEditorWindow(QDialog):
         # created once and kept for the editor's lifetime, but deliberately with
         # no Qt parent (see StackupPreviewWindow docstring) - cleaned up explicitly
         # in closeEvent() below rather than via Qt's parent-child auto-delete
-        self.preview_window = StackupPreviewWindow(self.vector_widget, chiplet_switcher=self.chiplet_switcher)
+        self.preview_window = StackupPreviewWindow(self.vector_widget, chiplet_switcher=self.chiplet_switcher,
+                                                    show_errors_fn=self._show_errors_in_xml_preview)
         self.preview_window.move(self.x() + self.width() + 20, self.y())
 
         if initial_filename and os.path.isfile(initial_filename):
@@ -3083,6 +3121,7 @@ class StackupEditorWindow(QDialog):
         # file's invalidity is meaningless for this one
         self._was_valid = True
         self._invalid_field = None
+        self._preview_drawn_for_file = False
 
     def _record_undo_point(self):
         if self.tree is None:
@@ -3120,11 +3159,14 @@ class StackupEditorWindow(QDialog):
         """
         if errors:
             # data is not fully consistent yet (e.g. mid-edit) - leave the last
-            # good preview showing rather than risk parse_substrate() choking on it
+            # good preview showing rather than risk parse_substrate() choking on it,
+            # but mark it as not up to date
+            count = f"{len(errors)} error" + ("s" if len(errors) != 1 else "")
+            self._mark_preview_stale(f"the stackup has {count}. See the XML Preview tab.")
             return []
         try:
             materials_list, dielectrics_list, metals_list = stackup_reader.parse_substrate(root)
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as e:
             # SystemExit is caught deliberately (not just Exception): the reader's
             # derived_layer class calls exit(1) on a handful of hard requirements
             # (invalid Operation, wrong operand count, ...) instead of raising.
@@ -3132,11 +3174,45 @@ class StackupEditorWindow(QDialog):
             # exactly so errors should already be non-empty and we shouldn't even
             # get here, but this is cheap insurance against ending the whole
             # process over a gap in that mirroring rather than just skipping a
-            # preview refresh.
+            # preview refresh. The XML Preview tab shows no errors in this case,
+            # so the banner gives the reader's own message instead of pointing there.
+            reason = str(e) if isinstance(e, Exception) and str(e) else "see the console output for details"
+            self._mark_preview_stale(f"the stackup could not be drawn ({reason}).",
+                                     show_errors_button=False)
             return []
         self.vector_widget.refresh(materials_list, dielectrics_list, metals_list)
         self.chiplet_switcher.set_groups(dielectrics_list.chiplet_groups)
+        self._preview_drawn_for_file = True
+        self.vector_widget.set_stale(False)
+        self.preview_window.set_stale_message(None)
         return dielectrics_list.find_z_overlaps() + dielectrics_list.find_missing_chiplet_boundary_warnings()
+
+    def _mark_preview_stale(self, reason, show_errors_button=True):
+        if self._preview_drawn_for_file:
+            self.vector_widget.set_stale(True)
+            message = f"⚠ Not up to date: {reason}"
+        else:
+            # nothing of this file drawn yet - clear the preview rather than strike
+            # through a drawing of the previously opened file
+            empty_dielectrics = stackup_reader.dielectric_layers_list()
+            self.vector_widget.refresh(stackup_reader.stackup_materials_list(), empty_dielectrics,
+                                       stackup_reader.metal_layers_list())
+            self.chiplet_switcher.set_groups(empty_dielectrics.chiplet_groups)
+            self.vector_widget.set_stale(False)
+            message = f"⚠ No preview: {reason}"
+        self.preview_window.set_stale_message(message, show_errors_button)
+
+    def _show_errors_in_xml_preview(self):
+        """The preview banner's "Show errors" button: brings this editor to the front
+        on its XML Preview tab, which lists every validation error."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if self.tabs.currentWidget() is self.xml_preview_tab:
+            self._refresh_xml_preview()
+        else:
+            # switching tabs refreshes it, see _on_tab_changed()
+            self.tabs.setCurrentWidget(self.xml_preview_tab)
 
     def _on_preview_element_selected(self, kind, name):
         """Preview -> table: a shape was clicked in the cross-section preview -
@@ -3174,14 +3250,14 @@ class StackupEditorWindow(QDialog):
         warnings = warnings or []
         self.status_details_btn.setVisible(bool(warnings) and not errors)
         if errors:
-            self.status_label.setText(f"{len(errors)} problem(s) - see Save for details.")
+            self.status_label.setText(f"{len(errors)} problem(s) - see XML Preview tab for details.")
             self.status_label.setStyleSheet("color: darkred;")
         elif warnings:
             # short line only - the full text used to be inlined here, which could grow
             # to an unreasonable single-line length (every warning joined with "; ") and
             # forced the whole window wider to fit it. Full text now lives behind the
             # "Details..." button instead, mirroring how the errors case above already
-            # points at Save's own dialog rather than inlining every error.
+            # points at the XML Preview tab rather than inlining every error.
             self.status_label.setText(f"Valid - {len(warnings)} note(s).")
             self.status_label.setStyleSheet("color: #b8860b;")
             self._status_details_text = "\n".join(f"- {w}" for w in warnings)
