@@ -1694,6 +1694,10 @@ class VectorWidget(QGraphicsView):
         # it" behavior doesn't misfire just because a chiplet-owned item happened to carry
         # its selection over into a freshly-entered topology view
         self._restoring_selection = False
+        # True while the drawing no longer matches the data being edited (e.g. the
+        # Stackup Editor's file is invalid and the last good drawing is kept) - see
+        # set_stale()/drawForeground()
+        self._stale = False
         # set via set_chiplet_switcher() by whoever constructs this widget, once its
         # own ChipletSwitcher exists too - lets Left/Right (see keyPressEvent below)
         # drive the same single source of truth (the switcher's combo index) as
@@ -1742,6 +1746,36 @@ class VectorWidget(QGraphicsView):
         """
         self._topology_mode = bool(enabled)
         self._rebuild_scene()
+
+    def set_stale(self, stale):
+        """Marks the drawing as out of date (True) or current (False). A stale
+        drawing stays visible but is dimmed and struck through by a thin red
+        diagonal line, so it isn't mistaken for the current state - used by the
+        Stackup Editor while its file is invalid and only the last good drawing
+        can be shown.
+        """
+        stale = bool(stale)
+        if stale != self._stale:
+            self._stale = stale
+            self.viewport().update()
+
+    def drawForeground(self, painter, rect):
+        super().drawForeground(painter, rect)
+        if not self._stale:
+            return
+        # drawn here rather than as a scene item: _rebuild_scene() clears the
+        # scene on every resize/chiplet switch, the view's foreground survives it.
+        # Viewport coordinates, so the line always spans the whole visible pane.
+        painter.save()
+        painter.resetTransform()
+        viewport_rect = self.viewport().rect()
+        painter.fillRect(viewport_rect, QColor(255, 255, 255, 120))
+        pen = QPen(QColor(210, 0, 0))
+        pen.setWidthF(2)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(viewport_rect.left(), viewport_rect.bottom()),
+                         QPointF(viewport_rect.right(), viewport_rect.top()))
+        painter.restore()
 
     def keyPressEvent(self, event):
         if self._chiplet_switcher is not None and event.key() in (Qt.Key_Left, Qt.Key_Right):

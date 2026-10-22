@@ -294,12 +294,15 @@ def _build_tree(slabs, layers, materials, warnings, derived_layers=None):
   # (both source formats define it that way) rather than that metal's TOP, where it
   # actually needs to start - shift any via whose zmin coincides with a metal's zmin
   # up by that metal's own thickness.
+  # A metal that only shares its zmin with the via by coincidence (e.g. a thick *.ltd
+  # EXPAND DOWN metal reaching the via's bottom interface) must not shrink the via to
+  # nothing - only nudge while the via keeps a positive height.
   metal_spans = [(l.zmin, l.zmax - l.zmin) for l in layers if l.kind == "metal"]
   for l in layers:
     if l.kind != "via":
       continue
     for metal_zmin, metal_thickness in metal_spans:
-      if abs(l.zmin - metal_zmin) < _EPSILON_UM:
+      if abs(l.zmin - metal_zmin) < _EPSILON_UM and l.zmin + metal_thickness < l.zmax - _EPSILON_UM:
         l.zmin += metal_thickness
         break
 
@@ -584,7 +587,23 @@ def _ltd_kv(line):
   return {key.upper(): value.strip('"') for key, value in _KV_RE.findall(line)}
 
 
+# keywords that start a new statement in each section - any other line in these sections
+# is a continuation of the previous statement (a long MATERIAL/MASK/LAYER line wrapped
+# onto the next line, e.g. "IMAG_PERMEABILITY=0", "OPERATION=...", or a MASK's own
+# "MASK_PROPERTIES = {...}" line) and is joined back onto it
+_LTD_STATEMENT_KEYWORDS = {
+    "MATERIAL": {"MATERIAL"},
+    "OPERATION": {"OPERATION"},
+    "MASK": {"MASK"},
+    "DERIVEDMASK": {"DERIVEDMASK"},
+    "STACK": {"TOP", "INTERFACE", "LAYER", "BOTTOM"},
+}
+
+
 def _split_ltd_sections(text):
+  # END_<section> is not always on a line of its own - seen trailing the last statement
+  # ("OPERATION OperationTSV_Virtual_VIA1 DRILL END_OPERATION")
+  text = re.sub(r'\s+(END_\w+)\b', r'\n\1', text)
   sections = {}
   current = None
   buf = []
@@ -603,7 +622,11 @@ def _split_ltd_sections(text):
       current = None
       continue
     if current:
-      buf.append(line)
+      keywords = _LTD_STATEMENT_KEYWORDS.get(current)
+      if keywords and buf and line.split()[0] not in keywords:
+        buf[-1] = buf[-1] + " " + line
+      else:
+        buf.append(line)
   return sections
 
 
@@ -679,10 +702,13 @@ def _parse_ltd(ltd_path, air_thickness_um, warnings):
     elif "INTRUDE" in kv or "EXPAND" in kv:
       # both give a thickness in meters; DOWN (vs. the default UP) means this metal
       # grows downward from its interface into the slab below - same concept *.subst
-      # expresses via a negative thick value, here via an explicit direction token
+      # expresses via a negative thick value, here via an explicit direction token.
+      # INTRUDE places the metal inside the existing slab; EXPAND makes that slab
+      # thicker by the metal thickness (same as *.subst's expand="1"), handled when
+      # the stack is walked below.
       magnitude_um = float(kv.get("INTRUDE") or kv.get("EXPAND")) * 1e6
       thickness_um = -magnitude_um if "DOWN" in tokens else magnitude_um
-      operations[name] = ("metal", thickness_um)
+      operations[name] = ("metal", thickness_um, "EXPAND" in kv)
     elif "SHEET" in tokens:
       operations[name] = ("sheet", None)
     elif "WALL" in tokens:
@@ -773,7 +799,33 @@ def _parse_ltd(ltd_path, air_thickness_um, warnings):
   groundplane_detected = False
   bottom_state = None
 
-  for line in reversed(stack_lines):
+  # EXPAND metals make the dielectric LAYER next to their INTERFACE thicker (DOWN: the
+  # LAYER below, UP: the one above) - by the thickest such metal on that interface, not
+  # the sum (ADS shows TFR 0.05um + MET1 1um EXPAND DOWN on one interface as +1um). A
+  # LAYER can grow from both sides (metal EXPAND UP below it, another EXPAND DOWN above
+  # it), which adds up. Must be known before the bottom-up walk reaches that LAYER, so
+  # collected up front: (line index in file order, top-to-bottom; +1 DOWN / -1 UP) ->
+  # extra thickness in um
+  expand_um = {}
+  for idx, line in enumerate(stack_lines):
+    if line.split()[0] != "INTERFACE":
+      continue
+    mask_match = _MASK_BRACE_RE.search(line)
+    for token in mask_match.group(1).split() if mask_match else []:
+      mask = _resolve_mask_token(token, masks, masks_by_layer)
+      op = operations.get(mask["operation"]) if mask else None
+      if op is None or op[0] != "metal" or not op[2]:
+        continue
+      side = 1 if op[1] < 0 else -1
+      target = idx + side
+      if 0 <= target < len(stack_lines) and stack_lines[target].split()[0] == "LAYER":
+        expand_um[(target, side)] = max(expand_um.get((target, side), 0.0), abs(op[1]))
+      else:
+        warnings.append(f"Mask '{mask['name']}' uses EXPAND but has no dielectric LAYER on that "
+                         f"side of its INTERFACE - placed without growing any layer")
+
+  for idx in reversed(range(len(stack_lines))):
+    line = stack_lines[idx]
     tokens = line.split()
     if not tokens:
       continue
@@ -809,7 +861,8 @@ def _parse_ltd(ltd_path, air_thickness_um, warnings):
       if material_name not in materials:
         warnings.append(f"Dielectric slab material '{material_name}' not found, skipped")
         continue
-      thickness_um = float(height_m) * 1e6 if height_m else 0.0
+      thickness_um = ((float(height_m) * 1e6 if height_m else 0.0)
+                      + expand_um.get((idx, 1), 0.0) + expand_um.get((idx, -1), 0.0))
       zmin = z
       z += thickness_um
       slabs.append(DielectricSlab(material_name, thickness_um))
