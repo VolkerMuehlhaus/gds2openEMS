@@ -29,9 +29,15 @@ Without this line, openEMS uses its CPU engine as before. Nothing else in the mo
 - Small models with simple PEC boundaries gain less.
 - The S-parameters and antenna results agree between CPU and GPU. Changing the boundary type changes the results much more than changing the engine.
 
-### Apple M4, macOS
+### Apple M4 (MacBook Air, 10 CPU cores, 8-core GPU), macOS
 
-To be added.
+![GPU speedup over the CPU engine, Apple M4](img/speedup_overview_m4.png)
+
+- The GPU engine was 1.2× to 3.5× faster than the CPU engine on the same machine.
+- The gain is largest with PML boundaries, even for a small model: 3.5× for the thru line with 0.36 M cells.
+- Without PML, the gain is small: 1.2× for the GSG thru line. Its timesteps were 1.5× faster on the GPU, but openEMS sets up the model on the CPU for both engines, and in this short run the setup took a large part of the time.
+- The S-parameters agree between CPU and GPU, within 0.015 dB for the transmission.
+- These two models are the workflow examples `run_line_full2port.py` and `run_line_GSG_complex.py`, much smaller than the models tested on hpz2.
 
 ## Test models
 
@@ -41,3 +47,5 @@ Each folder has the GDSII file, the stackup, the model scripts for CPU and GPU, 
 |---|---|
 | [`dual_dipole`](dual_dipole) | Dual dipole antenna at 245 GHz, with PML and with MUR boundaries |
 | [`ind500p`](ind500p) | Octagon inductor with center tap, 0–100 GHz |
+| [`line_full2port`](line_full2port) | Thru line with PML boundaries, full 2-port, 20–100 GHz (tested on Apple M4) |
+| [`line_GSG`](line_GSG) | GSG thru line with composite ports, 0–350 GHz (tested on Apple M4) |
