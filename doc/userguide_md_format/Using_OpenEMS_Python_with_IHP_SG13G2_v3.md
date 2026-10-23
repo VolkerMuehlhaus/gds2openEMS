@@ -299,6 +299,7 @@ Settings keys are case-insensitive: `settings['numthreads']` works like `setting
 | `settings['fill_factor_correction']` | `False` | Scale the conductivity of merged via arrays by their via fill factor — see [Input files](#input-files) |
 | `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` |
 | `settings['numThreads']` | automatic | Force the openEMS solver thread count — see [Forcing the solver thread count](#forcing-the-solver-thread-count) |
+| `settings['engine']` | openEMS default | openEMS engine, e.g. `'gpu'` — see [Running on the GPU](#running-on-the-gpu) |
 | `settings['resonance_estimation']` | `False` | Stop openEMS when the extrapolated S-parameters have converged; `energy_limit` stays the upper limit — see [Resonance estimation](#resonance-estimation-stop-when-the-result-has-converged) |
 | `settings['easyMesh']` | `False` | Use the easyMesh4openEMS automatic mesh generator instead of the built-in one — see [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems) |
 | `settings['field_dumps']` | none | A `simulation_setup.all_field_dumps()` object — see [Field dumps](#field-dumps) |
@@ -395,6 +396,25 @@ settings['numThreads'] = 8   # 0 (or omitted) = automatic detection
 ```
 
 See `more_examples/numThreads/` for complete examples in both the `settings{}` and loose-variable styles.
+
+### Running on the GPU
+
+openEMS has a GPU engine: Metal on macOS, HIP on AMD (ROCm) and NVIDIA (CUDA) GPUs. `settings['engine']` selects it:
+
+```python
+settings['engine'] = 'gpu'   # omitted: openEMS default (multithreaded CPU engine)
+```
+
+The value is passed to openEMS as the `--engine` option, so other engines (e.g. `'multithreaded'`) work too.
+
+**Getting openEMS with the GPU engine:** the GPU engine is newer than the latest openEMS release (v0.37.0), and the release packages, including the Windows package, don't have it yet. Until the next release, build openEMS from its current source code, [openEMS-Project](https://github.com/thliebig/openEMS-Project), as described in the [openEMS installation guide](https://docs.openems.de/), with the Python bindings. On macOS, the Metal backend is built by default. The HIP backend for AMD and NVIDIA GPUs needs ROCm, or CUDA with the HIP headers, on the build machine; see the "Build" section of the [openEMS change log](https://github.com/thliebig/openEMS/blob/master/CHANGELOG.md). In a build with the GPU engine, `openEMS --help` lists `gpu` for `--engine`.
+
+- openEMS without the GPU engine (v0.37.0 and older) ignores the setting without an error and runs on the CPU. gds2openEMS prints a warning when it finds such an openEMS. The openEMS output shows which engine runs: `Create FDTD engine (GPU, backend: ...)` for the GPU engine.
+- openEMS with the GPU engine stops with an error if it finds no usable GPU device, and gds2openEMS stops too. It doesn't fall back to the CPU.
+
+Changing the engine is a change to the model script, so the simulation runs again instead of reusing existing results.
+
+With PML boundaries the GPU engine gains most, because the CPU engine is slow for PML. On an Apple M4 (Metal), `run_line_full2port.py` (PML) ran 3.5 times faster than on the CPU, `run_line_GSG_complex.py` (PEC and MUR boundaries) 1.5 times. The S-parameters differ only slightly, mostly because the run ends at a slightly different timestep. If a part of the model has no GPU implementation, openEMS prints a warning listing it; it then runs on the CPU, and the speed gain is mostly lost.
 
 ### Resonance estimation: stop when the result has converged
 
