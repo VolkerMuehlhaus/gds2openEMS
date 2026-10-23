@@ -8,7 +8,7 @@ Each cell update is simple arithmetic on a few numbers, and all cells can be upd
 
 ## What is new
 
-openEMS now has a GPU engine. It runs on Apple GPUs (Metal, macOS) and on AMD and NVIDIA GPUs (HIP). It is not in an openEMS release yet: you have to build openEMS from its current source code. See [Running on the GPU](../../doc/userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#running-on-the-gpu) in the user's guide.
+openEMS now has a GPU engine. It runs on Apple GPUs (Metal, macOS), AMD GPUs (HIP/ROCm) and NVIDIA GPUs (CUDA). The tests below cover AMD and Apple; NVIDIA was not tested here. The GPU engine is not in an openEMS release yet: you have to build openEMS from its current source code. See [Running on the GPU](../../doc/userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#running-on-the-gpu) in the user's guide.
 
 In the gds2openEMS model script, one line switches to the GPU:
 
