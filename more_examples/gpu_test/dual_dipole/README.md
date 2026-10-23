@@ -20,7 +20,7 @@ settings['Boundaries'] = ['PML_8'] * 6      # or ['MUR'] * 6
 
 All four also set `settings['resonance_estimation'] = False`, so every run continues until the energy has decayed to the -40 dB end criterion. That makes the run times comparable.
 
-The runs were on hpz2: AMD Ryzen AI Max+ PRO 395 (16 cores, 32 threads) with integrated Radeon 8060S GPU, Linux. They ran one after another, because the CPU and the integrated GPU share the same memory.
+The runs were on hpz2: AMD Ryzen AI Max+ PRO 395 (16 cores, 32 threads) with integrated Radeon 8060S GPU, Linux. They ran one after another, because the CPU and the integrated GPU share the same memory. The same four runs on an Apple M4 are [further below](#apple-m4-macos).
 
 ## PML boundaries: 3.6× faster
 
@@ -62,6 +62,34 @@ Again, CPU and GPU give the same S11, within 0.04 dB.
 The boundary type changes the result far more than the engine does. With MUR, the S11 minimum is 1 dB deeper and the curves differ by up to 1.6 dB, about 40 times the CPU/GPU difference. The directivity at 245 GHz is 0.36 dB higher with MUR.
 
 MUR is a simpler absorbing boundary and reflects part of the radiated wave back into the model. PML is the better reference for antennas. With the GPU engine, PML costs little extra time: 14 minutes with PML, 12 minutes with MUR.
+
+## Apple M4, macOS
+
+The same four scripts also ran on an Apple M4 MacBook Air (10 CPU cores, 8-core GPU, 16 GB RAM, macOS), one after another:
+
+| Boundaries | CPU engine | GPU engine (Metal) | GPU speedup |
+|---|---|---|---|
+| `PML_8` | 145 min, 165 MC/s, 4 threads | 30 min, 833 MC/s | 4.9× |
+| `MUR` | 56 min, 433 MC/s, 2 threads | 27 min, 922 MC/s | 2.1× |
+
+![Solver speed over wall time, Apple M4](img/speed_vs_time_m4.png)
+
+The M4's GPU engine is about half as fast as hpz2's (833 against 1,740 MC/s with PML), its CPU engine about a third as fast (165 against 480 MC/s). So the GPU gains even more here: 4.9× with PML, against 3.6× on hpz2. With MUR it is 2.1×, against 2.6× on hpz2. With MUR, the automatic thread count chose only 2 threads for the CPU engine.
+
+During the PML run, the GPU speed fell slowly from 875 to about 805 MC/s. The MacBook Air has no fan; macOS recorded no thermal warning during the runs.
+
+![S11, CPU vs GPU, Apple M4](img/s11_m4.png)
+
+CPU and GPU give the same S11, within 0.022 dB with PML and 0.021 dB with MUR, and the same antenna results as on hpz2:
+
+| At 245 GHz | PML, CPU | PML, GPU | MUR, CPU | MUR, GPU |
+|---|---|---|---|---|
+| Directivity | 8.10 dBi | 8.10 dBi | 8.44 dBi | 8.44 dBi |
+| Radiation efficiency | 77.54 % | 77.55 % | 77.24 % | 77.25 % |
+
+As on hpz2, the boundary type changes S11 far more than the engine: up to 1.5 dB between PML and MUR.
+
+The M4 runs used openEMS v0.37.0-32-gec4d2db and gds2openEMS 0.6.3, with the CPU engine's automatic thread count and the Metal backend of the GPU engine. The run ends after 189,001 (CPU) or 190,656 (GPU) timesteps.
 
 ## Test details
 
