@@ -12,6 +12,7 @@ README with the details.
 | [`combine_layout_sources`](combine_layout_sources) | Combining GDS-derived geometry, manually-added polygons, native openEMS shapes and an STL import in one model - and which of those get automatic mesh refinement |
 | [`core_transistor_3port_bce`](core_transistor_3port_bce) | 5-port transistor parasitic-extraction network: 2 RF pad via ports plus 3 via ports straight to the Base/Collector/Emitter terminals, referenced to an artificial ground plane |
 | [`easyMesh`](easyMesh) | The `settings{}` dict script style, a full generic n-port sweep, and the third-party easyMesh4openEMS meshing module |
+| [`gpu_test`](gpu_test) | `settings['engine'] = 'gpu'`: CPU vs GPU engine speed and results for a 245 GHz dual dipole antenna (`PML_8` and `MUR`) and an inductor |
 | [`local_modules_copy`](local_modules_copy) | Running gds2openEMS from a local `modules/` folder copy instead of the installed PyPI package |
 | [`numThreads`](numThreads) | Forcing a fixed openEMS solver thread count instead of automatic detection |
 | [`parameterized_XML_stackup`](parameterized_XML_stackup) | Overriding stackup `<Variable>`s from a Python script without editing the XML file |
