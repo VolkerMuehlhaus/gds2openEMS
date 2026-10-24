@@ -278,7 +278,11 @@ def _extrapolate_mp(sig, te, e, info, sv_tol=1e-5):
     for y, s in zip(Y, scale):
         n = np.arange(len(y) - n0)
         r = np.linalg.lstsq(z[None, :] ** n[:, None], y[n0:], rcond=None)[0]
-        X.append(np.real((z[None, :] ** (np.arange(n_to) - n0)[:, None]) @ r) * s)
+        # only the samples after the recorded signal are used (_rebuild): evaluating the fit at
+        # samples before n0 means negative powers of z, which overflow for fast-decaying poles
+        x = np.zeros(n_to)
+        x[len(y):] = np.real((z[None, :] ** (np.arange(len(y), n_to) - n0)[:, None]) @ r) * s
+        X.append(x)
     info.update(method='free-decay fit (matrix pencil)', order=M, poles=z, dt=dt)
     return _rebuild(sig, keys, X, dt)
 

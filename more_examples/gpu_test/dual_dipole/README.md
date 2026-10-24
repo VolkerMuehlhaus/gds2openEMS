@@ -91,13 +91,54 @@ As on hpz2, the boundary type changes S11 far more than the engine: up to 1.5 dB
 
 The M4 runs used openEMS v0.37.0-32-gec4d2db and gds2openEMS 0.6.3, with the CPU engine's automatic thread count and the Metal backend of the GPU engine. The run ends after 189,001 (CPU) or 190,656 (GPU) timesteps.
 
+## Resonance estimation: when is the simulation finished?
+
+All runs above stop when the energy left in the model has dropped to −40 dB. That end criterion is a guess. If it is too early, part of the slowly decaying antenna signal is cut off and S11 gets a ripple. `settings['resonance_estimation'] = True` decides automatically instead: it extends the port signals while openEMS runs and stops openEMS once the extended S11 no longer changes. See the [resonance estimation example](../../resonance_estimation/README.md) for how it works.
+
+Resonance estimation can't be used together with the antenna pattern calculation, because that records fields at the model boundary during the run. These two scripts therefore calculate S11 only:
+
+| Script | Engine |
+|---|---|
+| [`openEMS_dual_dipole_pml_cpu_re.py`](openEMS_dual_dipole_pml_cpu_re.py) | CPU (default) |
+| [`openEMS_dual_dipole_pml_gpu_re.py`](openEMS_dual_dipole_pml_gpu_re.py) | GPU |
+
+Compared with the PML scripts above, they set:
+
+```python
+settings['resonance_estimation'] = True   # stop when the extended S11 has converged
+settings['energy_limit'] = -60            # safety limit only, in case resonance estimation never converges
+```
+
+and have no NF2FF box and no antenna pattern calculation. Both ran on hpz2.
+
+### −40 dB was too early for this antenna
+
+Resonance estimation stopped both runs at the same point, after 302 ps of simulated time. By then the energy had dropped to about −45.5 dB, and the run needed 241,000 timesteps instead of 190,000 with the −40 dB end criterion.
+
+| Run | Timesteps | openEMS solve time |
+|---|---|---|
+| CPU, end criterion −40 dB | 189,001 | 50 min |
+| CPU, resonance estimation | 240,637 | 64 min |
+| GPU, end criterion −40 dB | 190,656 | 14 min |
+| GPU, resonance estimation | 241,630 | 18 min |
+
+So here resonance estimation made the runs longer, not shorter, because −40 dB stopped too early. The GPU engine is 3.6× faster in both cases.
+
+![S11 with end criterion -40 dB vs resonance estimation](img/s11_resonance_estimation.png)
+
+On the left, the two S11 curves look the same. The difference on the right shows what −40 dB missed: a ripple across the whole band, up to 0.25 dB near the sharp S11 dip at 282 GHz. This is the truncation error of the −40 dB runs.
+
+With resonance estimation, CPU and GPU agree within 0.006 dB (red line). At −40 dB they differed by 0.02 dB, because the two engines stopped at slightly different timesteps. Once the signals are complete, that difference disappears too.
+
+The antenna pattern calculation needs a fixed energy limit. For this antenna, use a lower energy limit than −40 dB there.
+
 ## Test details
 
 | Item | Value |
 |---|---|
 | Mesh | 259 × 259 × 113 = 7.58 M cells, smallest cell 2.07 × 2.50 × 0.40 µm |
 | Excitation | Gaussian pulse 200–300 GHz, timestep 1.26 fs |
-| End criterion | `energy_limit = -40` dB, about 190,000 timesteps |
+| End criterion | `energy_limit = -40` dB, about 190,000 timesteps; with resonance estimation about 241,000 timesteps |
 | openEMS | v0.37.0-33-g53a4264 (built from source, with GPU engine) |
 | gds2openEMS | 0.6.3 |
 | CPU engine | 32 threads (automatic thread count) |
