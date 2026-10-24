@@ -2,6 +2,12 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 24-Oct-2026
+
+**Bugfix:** with `settings['resonance_estimation'] = True`, numpy could print "RuntimeWarning: overflow encountered in power" during a run. The results were not affected. The warning no longer appears.
+
+Version 0.6.4.
+
 ## 23-Oct-2026
 
 New option `settings['engine']` to choose the openEMS engine, e.g. the new GPU engine of openEMS (Metal on macOS, HIP on AMD and NVIDIA GPUs):
