@@ -33,12 +33,13 @@ Without this line, openEMS uses its CPU engine as before. Nothing else in the mo
 
 ![GPU speedup over the CPU engine, Apple M4](img/speedup_overview_m4.png)
 
-- The GPU engine was 1.05× to 3.5× faster than the CPU engine on the same machine.
-- The gain is large with PML boundaries, even for a small model: 3.5× for the thru line with 0.36 M cells. With PML, the CPU engine is slow.
-- Without PML, the gain is small. With PEC boundaries, the M4's CPU engine runs at about the same speed as its GPU: the inductor was only 1.05× faster on the GPU, against 1.6× on hpz2.
+- The GPU engine was 1.05× to 4.9× faster than the CPU engine on the same machine.
+- The gain is largest for big models with PML boundaries: 4.9× for the dual dipole, 145 minutes on the CPU against 30 minutes on the GPU. Even the small thru line with PML was 3.5× faster. With PML, the CPU engine is slow.
+- Without PML, the gain is smaller: 2.1× for the dual dipole with MUR. With PEC boundaries, the M4's CPU engine runs at about the same speed as its GPU: the inductor was only 1.05× faster on the GPU, against 1.6× on hpz2.
 - For the GSG thru line (1.2×), the timesteps were 1.5× faster on the GPU, but openEMS sets up the model on the CPU for both engines, and in this short run the setup took a large part of the time.
-- The S-parameters and the inductor's L and Q agree between CPU and GPU.
-- The thru lines are the workflow examples `run_line_full2port.py` and `run_line_GSG_complex.py`. The dual dipole was not run on the M4.
+- The S-parameters, the antenna results and the inductor's L and Q agree between CPU and GPU.
+- Compared to hpz2, the M4's GPU is about half as fast and its CPU engine about a third as fast. The GPU therefore gains more with PML on the M4 (4.9× against 3.6× for the dual dipole), but less without PML.
+- The thru lines are the workflow examples `run_line_full2port.py` and `run_line_GSG_complex.py`.
 
 ## Test models
 
