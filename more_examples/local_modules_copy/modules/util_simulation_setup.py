@@ -819,6 +819,24 @@ def _print_once (message):
         print(message)
 
 
+def _openEMS_has_gpu_engine ():
+    # openEMS with the GPU engine (built from master after v0.37.0) documents engine='gpu' in Run().
+    # Older releases, v0.37.0 included, have no GPU engine and silently ignore an unknown --engine
+    # value: the simulation then runs on the CPU without an error. None if it can't be told.
+    doc = getattr(openEMS.Run, '__doc__', None)
+    if not doc:
+        return None
+    return "'gpu'" in doc
+
+
+def _check_engine (engine):
+    if engine and str(engine).lower().startswith('gpu'):
+        if _openEMS_has_gpu_engine() is False:
+            _print_once(f"[WARNING] settings['engine'] = '{engine}': the installed openEMS has no GPU engine. "
+                        "It ignores this setting and runs on the CPU. The GPU engine needs openEMS built "
+                        "from its current source code, see 'Running on the GPU' in the user's guide.")
+
+
 def _case_insensitive (settings):
     # settings[] keys are case-insensitive, see CaseInsensitiveSettings
     return None if settings is None else CaseInsensitiveSettings(settings)
@@ -972,6 +990,7 @@ def runSimulation (excite_portnumbers=None,
                    no_gui = False,
                    numThreads=None,
                    resonance_estimation=False,
+                   engine=None,
                    settings=None):
     # This function runs the actual simulation in openEMS
 
@@ -994,6 +1013,7 @@ def runSimulation (excite_portnumbers=None,
             no_gui             = settings.get('no_gui', False)
             numThreads         = settings.get('numThreads', 0)
             resonance_estimation = settings.get('resonance_estimation', False)
+            engine             = settings.get('engine', None)
         else:
             print('If positional parameters are not defined in setupSimulation, you must provide valid "settings" dictionary instead')                
             exit(1)
@@ -1011,6 +1031,13 @@ def runSimulation (excite_portnumbers=None,
     # numThreads is optional, setting this to 0 will use automatic thread detection in openEMS solver
     if numThreads is None:
         numThreads = 0
+
+    # engine is optional, e.g. 'gpu' for the GPU engine of openEMS. If not set, the
+    # engine option is not passed and openEMS uses its default (multithreaded CPU engine)
+    run_options = {'numThreads': numThreads}
+    if engine:
+        run_options['engine'] = engine
+        _check_engine(engine)
        
 
     # Write JSON with port information to simulation data directory, used for external de-embedding
@@ -1092,8 +1119,13 @@ def runSimulation (excite_portnumbers=None,
                     # Python buffers its output when it is not a terminal (e.g. in a log window), openEMS
                     # does not: flush, so that the messages appear in the right order
                     sys.stdout.flush()
-                    FDTD.Run(excitation_path, numThreads=numThreads)  # BE CAREFUL WITH COMMAND LINE OPTIONS HERE! Some openEMS releases will fail for repeated runs with multiple excitations.
+                    error_code = FDTD.Run(excitation_path, **run_options)  # BE CAREFUL WITH COMMAND LINE OPTIONS HERE! Some openEMS releases will fail for repeated runs with multiple excitations.
                     end = time.perf_counter()
+                    # FDTD.Run() doesn't raise an exception if the setup fails (e.g. no usable GPU device
+                    # for engine='gpu'), it returns the error code: stop here instead of reporting success
+                    if error_code:
+                        print(f'[ERROR] openEMS setup failed for excitation {excite_portnumbers}, error code {error_code}, see the openEMS messages above')
+                        sys.exit(1)
                     if resonance_estimation:
                         if monitor is not None:
                             monitor.finish()
@@ -1117,6 +1149,8 @@ def runSimulation (excite_portnumbers=None,
                     logfile.write('Simulation using automatic thread count set by solver\n')
                 else:
                     logfile.write(f'Simulation enforcing numThreads={numThreads} in model file\n')
+                if engine:
+                    logfile.write(f'Simulation using openEMS engine={engine}\n')
                 computer_name = socket.gethostname()
                 logfile.write(f'Host name: {computer_name} \n')
                 logfile.write(f'openEMS solve time for this excitation: {run_time_seconds} seconds\n')
@@ -1194,7 +1228,8 @@ def runOpenEMS (excite_ports, settings):
                                 preview_only, 
                                 False,
                                 numThreads = numThreads,
-                                resonance_estimation = settings.get('resonance_estimation', False))        
+                                resonance_estimation = settings.get('resonance_estimation', False),
+                                engine = settings.get('engine', None))        
     
 
         # Initialize an empty matrix for S-parameters

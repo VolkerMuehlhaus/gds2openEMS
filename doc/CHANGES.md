@@ -2,6 +2,20 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 23-Oct-2026
+
+New option `settings['engine']` to choose the openEMS engine, e.g. the new GPU engine of openEMS (Metal on macOS, HIP on AMD and NVIDIA GPUs):
+
+```python
+settings['engine'] = 'gpu'
+```
+
+Without it, nothing changes: openEMS uses its default multithreaded CPU engine. The GPU engine is not in an openEMS release yet (v0.37.0 doesn't have it): openEMS has to be built from its current source code. openEMS without the GPU engine ignores `'gpu'` and runs on the CPU; gds2openEMS warns about that. See [Running on the GPU](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#running-on-the-gpu) in the user's guide.
+
+**Bugfix:** if openEMS failed during setup, gds2openEMS still reported "FDTD simulation completed successfully". It now stops with an error.
+
+Version 0.6.3.
+
 ## 22-Oct-2026
 
 **Stackup XML Editor, ADS Momentum (*.ltd) import:** metals with an EXPAND thickness operation now make the dielectric next to them thicker, as in ADS, instead of reaching into the dielectric below. Before, a thick EXPAND DOWN metal (e.g. MET1/MET2 in a GaAs stackup) overlapped the layers underneath it, and a via could end up with zero height. Files where long lines are wrapped or END_... markers follow the last entry on the same line now import too; before, they failed with "No usable dielectric slabs".
