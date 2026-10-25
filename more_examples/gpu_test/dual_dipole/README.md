@@ -1,8 +1,59 @@
 # Dual dipole antenna: CPU vs GPU
 
-A 245 GHz dual dipole antenna on IHP SG13G2 (IHP design, K. Schmalz), `dipole_port_sg13.gds` with stackup `SG13G2_200um_backsideGND.xml`. The model has 7.6 M mesh cells and computes S11 from 200 to 300 GHz, plus the radiation pattern at 245 GHz.
+A 245 GHz dual dipole antenna on IHP SG13G2 (IHP design, K. Schmalz). The model has 7.6 M mesh cells. It computes S11 from 200 to 300 GHz and the radiation pattern at 245 GHz, with PML or with MUR absorbing boundaries.
 
-It was simulated four times: with the CPU and the GPU engine, each with PML and with MUR absorbing boundaries.
+## Key facts
+
+- With PML boundaries, the GPU was **3.6× to 4.9× faster** on the machines with a GPU built into the processor, and **about 29× faster** on the Windows laptop with its discrete NVIDIA GPU.
+- With MUR boundaries, the gain is smaller (2× to 10×), because the CPU engine is much faster with MUR.
+- CPU and GPU give the same S11 and the same antenna results.
+- PML or MUR changes the result far more than CPU or GPU.
+
+## Speed
+
+Solve time with PML boundaries:
+
+| Machine | CPU engine | GPU engine | GPU speedup |
+|---|---|---|---|
+| hpz2, Radeon 8060S | 50 min | 14 min | 3.6× |
+| Apple M4 | 145 min | 30 min | 4.9× |
+| Windows laptop, RTX 3060 | about 5.5 h (estimated) | 12 min | about 29× |
+
+![Solver speed over wall time, PML, hpz2](img/speed_vs_time.png)
+
+- The GPU engine runs at a steady speed from the start.
+- PML boundaries are slow on the CPU engine. That is where the GPU gains most.
+- The laptop's CPU engine is the slowest of the three, and its GPU the fastest, so the gap is largest there. Its CPU run was stopped once its speed had settled; the 5.5 hours are calculated from that speed.
+
+With MUR boundaries:
+
+| Machine | CPU engine | GPU engine | GPU speedup |
+|---|---|---|---|
+| hpz2 | 30 min | 12 min | 2.6× |
+| Apple M4 | 56 min | 27 min | 2.1× |
+| Windows laptop | about 1.5 h (estimated) | about 9 min (estimated) | about 10× |
+
+MUR needs much less computation than PML. The CPU engine profits a lot from that, the GPU engine less. On the laptop, both MUR runs were stopped once their speed had settled; the times are calculated from that speed and about 195,000 timesteps, as on hpz2.
+
+## Results
+
+![S11, CPU vs GPU, PML, hpz2](img/s11.png)
+
+The S11 curves of CPU and GPU lie on top of each other, on every machine. The antenna results agree too: about 8.1 dBi directivity and 77.5 % radiation efficiency at 245 GHz.
+
+The tiny differences (a few hundredths of a dB) come from where each run stops. The GPU engine checks the end criterion at other timesteps than the CPU engine.
+
+Per timestep, both engines converge the same way: the energy in the model decays identically, the GPU just gets there sooner (see [more plots](#more-plots)).
+
+## PML or MUR?
+
+![S11, PML vs MUR](img/s11_boundary.png)
+
+The boundary type changes S11 by up to 1.6 dB, about 40 times the CPU/GPU difference. With MUR, the directivity is also 0.36 dB higher.
+
+MUR is a simpler absorbing boundary and reflects part of the radiated wave back into the model. PML is the better choice for antennas. With the GPU engine, it costs little extra time: 14 minutes instead of 12 on hpz2.
+
+## Model and scripts
 
 | Script | Engine | Boundaries |
 |---|---|---|
@@ -18,129 +69,42 @@ settings['engine'] = 'gpu'                  # GPU scripts only
 settings['Boundaries'] = ['PML_8'] * 6      # or ['MUR'] * 6
 ```
 
-All four also set `settings['resonance_estimation'] = False`, so every run continues until the energy has decayed to the -40 dB end criterion. That makes the run times comparable.
-
-The runs were on hpz2: AMD Ryzen AI Max+ PRO 395 (16 cores, 32 threads) with integrated Radeon 8060S GPU, Linux. They ran one after another, because the CPU and the integrated GPU share the same memory. The same four runs on an Apple M4 are [further below](#apple-m4-macos).
-
-## PML boundaries: 3.6× faster
-
-![Solver speed over wall time, PML](img/speed_vs_time.png)
-
-The GPU engine ran at a steady 1,740 million cell updates per second (MC/s). The CPU engine ran at about 480 MC/s. The simulation took 14 minutes on the GPU and 50 minutes on the CPU.
-
-### Same convergence
-
-![Energy vs timestep and vs wall time, PML](img/convergence.png)
-
-Per timestep, the energy in the model decays the same way with both engines (left). The GPU only gets there sooner (right). Most of the run time is spent in the slow tail after the excitation, typical for a resonant structure like this antenna.
-
-### Same results
-
-![S11, CPU vs GPU, PML](img/s11.png)
-
-The S11 curves lie on top of each other. The largest difference is 0.02 dB. It comes from the two runs stopping at slightly different timesteps: the GPU engine checks the end criterion less often. The antenna results at 245 GHz agree as well:
-
-| At 245 GHz | CPU | GPU |
-|---|---|---|
-| Directivity | 8.09 dBi | 8.09 dBi |
-| Radiation efficiency | 77.54 % | 77.55 % |
-
-## MUR boundaries: 2.6× faster
-
-![Solver speed over wall time, MUR](img/speed_vs_time_mur.png)
-
-MUR boundaries need much less computation than PML. This helps the CPU engine a lot: it runs 66 % faster with MUR than with PML. The GPU engine gains only 22 %. So with MUR the GPU advantage drops to 2.6×: 12 minutes on the GPU, 30 minutes on the CPU.
-
-![S11, CPU vs GPU, MUR](img/s11_mur.png)
-
-Again, CPU and GPU give the same S11, within 0.04 dB.
-
-## PML or MUR?
-
-![S11, PML vs MUR](img/s11_boundary.png)
-
-The boundary type changes the result far more than the engine does. With MUR, the S11 minimum is 1 dB deeper and the curves differ by up to 1.6 dB, about 40 times the CPU/GPU difference. The directivity at 245 GHz is 0.36 dB higher with MUR.
-
-MUR is a simpler absorbing boundary and reflects part of the radiated wave back into the model. PML is the better reference for antennas. With the GPU engine, PML costs little extra time: 14 minutes with PML, 12 minutes with MUR.
-
-## Apple M4, macOS
-
-The same four scripts also ran on an Apple M4 MacBook Air (10 CPU cores, 8-core GPU, 16 GB RAM, macOS), one after another:
-
-| Boundaries | CPU engine | GPU engine (Metal) | GPU speedup |
-|---|---|---|---|
-| `PML_8` | 145 min, 165 MC/s, 4 threads | 30 min, 833 MC/s | 4.9× |
-| `MUR` | 56 min, 433 MC/s, 2 threads | 27 min, 922 MC/s | 2.1× |
-
-![Solver speed over wall time, Apple M4](img/speed_vs_time_m4.png)
-
-The M4's GPU engine is about half as fast as hpz2's (833 against 1,740 MC/s with PML), its CPU engine about a third as fast (165 against 480 MC/s). So the GPU gains even more here: 4.9× with PML, against 3.6× on hpz2. With MUR it is 2.1×, against 2.6× on hpz2. With MUR, the automatic thread count chose only 2 threads for the CPU engine.
-
-During the PML run, the GPU speed fell slowly from 875 to about 805 MC/s. The MacBook Air has no fan; macOS recorded no thermal warning during the runs.
-
-![S11, CPU vs GPU, Apple M4](img/s11_m4.png)
-
-CPU and GPU give the same S11, within 0.022 dB with PML and 0.021 dB with MUR, and the same antenna results as on hpz2:
-
-| At 245 GHz | PML, CPU | PML, GPU | MUR, CPU | MUR, GPU |
-|---|---|---|---|---|
-| Directivity | 8.10 dBi | 8.10 dBi | 8.44 dBi | 8.44 dBi |
-| Radiation efficiency | 77.54 % | 77.55 % | 77.24 % | 77.25 % |
-
-As on hpz2, the boundary type changes S11 far more than the engine: up to 1.5 dB between PML and MUR.
-
-The M4 runs used openEMS v0.37.0-32-gec4d2db and gds2openEMS 0.6.3, with the CPU engine's automatic thread count and the Metal backend of the GPU engine. The run ends after 189,001 (CPU) or 190,656 (GPU) timesteps.
-
-## Resonance estimation: when is the simulation finished?
-
-All runs above stop when the energy left in the model has dropped to −40 dB. That end criterion is a guess. If it is too early, part of the slowly decaying antenna signal is cut off and S11 gets a ripple. `settings['resonance_estimation'] = True` decides automatically instead: it extends the port signals while openEMS runs and stops openEMS once the extended S11 no longer changes. See the [resonance estimation example](../../resonance_estimation/README.md) for how it works.
-
-Resonance estimation can't be used together with the antenna pattern calculation, because that records fields at the model boundary during the run. These two scripts therefore calculate S11 only:
-
-| Script | Engine |
-|---|---|
-| [`openEMS_dual_dipole_pml_cpu_re.py`](openEMS_dual_dipole_pml_cpu_re.py) | CPU (default) |
-| [`openEMS_dual_dipole_pml_gpu_re.py`](openEMS_dual_dipole_pml_gpu_re.py) | GPU |
-
-Compared with the PML scripts above, they set:
-
-```python
-settings['resonance_estimation'] = True   # stop when the extended S11 has converged
-settings['energy_limit'] = -60            # safety limit only, in case resonance estimation never converges
-```
-
-and have no NF2FF box and no antenna pattern calculation. Both ran on hpz2.
-
-### −40 dB was too early for this antenna
-
-Resonance estimation stopped both runs at the same point, after 302 ps of simulated time. By then the energy had dropped to about −45.5 dB, and the run needed 241,000 timesteps instead of 190,000 with the −40 dB end criterion.
-
-| Run | Timesteps | openEMS solve time |
-|---|---|---|
-| CPU, end criterion −40 dB | 189,001 | 50 min |
-| CPU, resonance estimation | 240,637 | 64 min |
-| GPU, end criterion −40 dB | 190,656 | 14 min |
-| GPU, resonance estimation | 241,630 | 18 min |
-
-So here resonance estimation made the runs longer, not shorter, because −40 dB stopped too early. The GPU engine is 3.6× faster in both cases.
-
-![S11 with end criterion -40 dB vs resonance estimation](img/s11_resonance_estimation.png)
-
-On the left, the two S11 curves look the same. The difference on the right shows what −40 dB missed: a ripple across the whole band, up to 0.25 dB near the sharp S11 dip at 282 GHz. This is the truncation error of the −40 dB runs.
-
-With resonance estimation, CPU and GPU agree within 0.006 dB (red line). At −40 dB they differed by 0.02 dB, because the two engines stopped at slightly different timesteps. Once the signals are complete, that difference disappears too.
-
-The antenna pattern calculation needs a fixed energy limit. For this antenna, use a lower energy limit than −40 dB there.
+All four set `settings['resonance_estimation'] = False`, so every run continues to the −40 dB end criterion and the run times are comparable. The model files are `dipole_port_sg13.gds` and the stackup `SG13G2_200um_backsideGND.xml`.
 
 ## Test details
 
-| Item | Value |
-|---|---|
-| Mesh | 259 × 259 × 113 = 7.58 M cells, smallest cell 2.07 × 2.50 × 0.40 µm |
-| Excitation | Gaussian pulse 200–300 GHz, timestep 1.26 fs |
-| End criterion | `energy_limit = -40` dB, about 190,000 timesteps; with resonance estimation about 241,000 timesteps |
-| openEMS | v0.37.0-33-g53a4264 (built from source, with GPU engine) |
-| gds2openEMS | 0.6.3 |
-| CPU engine | 32 threads (automatic thread count) |
-| GPU engine | HIP backend, Radeon 8060S (integrated) |
-| Host | hpz2: AMD Ryzen AI Max+ PRO 395 (16 cores, 32 threads), 107 GB RAM, Linux |
+| | hpz2 | Apple M4 | Windows laptop |
+|---|---|---|---|
+| CPU | AMD Ryzen AI Max+ PRO 395, 16 cores | Apple M4, 10 cores | AMD Ryzen 7 5800H, 8 cores |
+| GPU | AMD Radeon 8060S, built-in, HIP | Apple M4, 8 cores, built-in, Metal | NVIDIA RTX 3060 Laptop, 6 GB, HIP |
+| Main memory, OS | 107 GB, Linux | 16 GB, macOS | 32 GB, Windows 11 |
+| openEMS | v0.37.0-33-g53a4264 | v0.37.0-32-gec4d2db | v0.37.0-38-gd686f1d (Windows test package) |
+| gds2openEMS | 0.6.3 | 0.6.3 | 0.6.4 |
+| CPU threads (automatic) | 32 | 4 (PML), 2 (MUR) | not recorded |
+| GPU speed, PML | 1,739 MC/s | 833 MC/s | 2,159 MC/s |
+| CPU speed, PML | 477 MC/s | 165 MC/s | 75 MC/s (settled, run stopped) |
+| GPU speed, MUR | 2,124 MC/s | 922 MC/s | 2,750 MC/s (settled, run stopped) |
+| CPU speed, MUR | 793 MC/s | 433 MC/s | 278 MC/s (settled, run stopped) |
+| Timesteps, PML (CPU / GPU) | 189,001 / 190,656 | 189,001 / 190,656 | – / 198,269 |
+
+All machines: mesh 259 × 259 × 113 = 7.58 M cells, smallest cell 2.07 × 2.50 × 0.40 µm, Gaussian pulse 200–300 GHz, timestep 1.26 fs, end criterion −40 dB. The runs on each machine ran one after another.
+
+GPU memory: the model used about 0.64 GB on the laptop's GPU. See [Discrete GPU or shared memory?](../README.md#discrete-gpu-or-shared-memory) for what that means for larger models.
+
+## More plots
+
+Energy decay per timestep and over wall time, PML, hpz2:
+
+![Energy vs timestep and vs wall time, PML](img/convergence.png)
+
+Solver speed and S11 with MUR, hpz2:
+
+![Solver speed over wall time, MUR](img/speed_vs_time_mur.png)
+
+![S11, CPU vs GPU, MUR](img/s11_mur.png)
+
+Solver speed and S11 on the Apple M4. The MacBook Air has no fan; the GPU speed fell slowly from 875 to about 805 MC/s during the PML run.
+
+![Solver speed over wall time, Apple M4](img/speed_vs_time_m4.png)
+
+![S11, CPU vs GPU, Apple M4](img/s11_m4.png)

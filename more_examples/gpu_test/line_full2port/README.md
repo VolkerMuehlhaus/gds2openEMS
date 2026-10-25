@@ -1,39 +1,54 @@
 # Thru line, full 2-port: CPU vs GPU
 
-A thru line on TopMetal2 (`line_simple.gds`, stackup `SG13G2_nosub.xml`), simulated from 20 to 100 GHz with two in-plane ports. This is the workflow example [`run_line_full2port.py`](../../../workflow/run_line_full2port.py). The model has 0.36 M mesh cells and `PML_8` boundaries on five sides (PEC below). It runs one excitation per port, so the GPU engine is started twice in the same Python process.
+A simple thru line on TopMetal2, simulated from 20 to 100 GHz with two ports. This is the workflow example [`run_line_full2port.py`](../../../workflow/run_line_full2port.py). The model is small (0.36 M mesh cells) but has PML boundaries.
+
+## Key facts
+
+- The GPU was **3.3× faster** on hpz2, **3.5× faster** on the Apple M4 and **14× faster** on the Windows laptop with its discrete NVIDIA GPU, although the model is small.
+- The reason is the PML boundaries: they are slow on the CPU engine.
+- CPU and GPU give the same S-parameters.
+
+## Speed
+
+Solve time per excitation (the model runs one excitation per port):
+
+| Machine | CPU engine | GPU engine | GPU speedup |
+|---|---|---|---|
+| hpz2, Radeon 8060S | 44 s | 13 s | 3.3× |
+| Apple M4 | 115 s | 33 s | 3.5× |
+| Windows laptop, RTX 3060 | 289 s | 21 s | 14× |
+
+- The GPU engine updates the PML boundaries together with the rest of the model, at full speed.
+- The laptop's CPU engine is especially slow with PML, and its GPU is fast, so the gap is largest there.
+
+## Results
+
+![S11 and S21, CPU vs GPU](img/line_full2port_cpu_gpu.png)
+
+The curves of CPU and GPU lie on top of each other (Apple M4 shown). S21 agrees within 0.015 dB, S11 within 0.02 dB in the useful range. On hpz2 and on the laptop, CPU and GPU even gave identical S-parameters, and the same on both machines.
+
+Only at the deepest S11 dip (−38 dB) is the difference larger, 0.12 dB. It comes from where each run stops: the GPU engine checks the end criterion at other timesteps than the CPU engine.
+
+## Model and scripts
 
 | Script | Engine |
 |---|---|
 | [`openEMS_line_full2port_cpu.py`](openEMS_line_full2port_cpu.py) | CPU (default) |
 | [`openEMS_line_full2port_gpu.py`](openEMS_line_full2port_gpu.py) | GPU: `settings['engine'] = 'gpu'` |
 
-That one line is the only difference between the two scripts. Compared to the workflow example, both also set `preview_only = False`, `no_gui = True` and `force_simulation = True` for a batch run.
-
-## Speed
-
-On an Apple M4 (MacBook Air, 10 CPU cores, 8-core GPU, macOS), the GPU engine solved the two excitations in 32 s and 33 s, the CPU engine in 112 s and 118 s. The GPU was 3.5× faster.
-
-The GPU engine ran at a steady 640 million cell updates per second (MC/s), the CPU engine at 160–175 MC/s. The CPU engine chose 4 threads by itself, the M4's performance cores.
-
-The gain is large although the model is small, because of the PML boundaries: they are slow on the CPU engine, and the GPU engine updates them together with the rest of the model.
-
-## Results
-
-![S11 and S21, CPU vs GPU](img/line_full2port_cpu_gpu.png)
-
-The curves lie on top of each other. The transmission (S21, S12) agrees within 0.015 dB, the reflection (S11, S22) within 0.02 dB above −30 dB, and within 0.12 dB at the lowest S11 of −38 dB. The differences come from the runs stopping at slightly different timesteps (CPU 52,629 and 51,636, GPU 51,662 for both): the GPU engine checks the end criterion at other timesteps.
+That one line is the only difference between the two scripts. Compared to the workflow example, both also set `preview_only = False`, `no_gui = True` and `force_simulation = True` for a batch run. The model files are `line_simple.gds` and the stackup `SG13G2_nosub.xml`. The boundaries are `PML_8` on five sides and PEC below.
 
 ## Test details
 
-| Item | Value |
-|---|---|
-| Mesh | 112 × 89 × 36 = 0.36 M cells, smallest cell 1.44 × 1.25 × 0.40 µm |
-| Excitation | Gaussian pulse 20–100 GHz, timestep 1.26 fs |
-| End criterion | `energy_limit = -40` dB, about 52,000 timesteps per excitation |
-| openEMS | v0.37.0-32-gec4d2db (built from source, with GPU engine) |
-| gds2openEMS | 0.6.3 |
-| CPU engine | 4 threads (automatic thread count) |
-| GPU engine | Metal backend, Apple M4 (integrated, 8 cores) |
-| Host | Apple M4 MacBook Air (4 performance and 6 efficiency cores), 16 GB RAM, macOS 26 |
+| | hpz2 | Apple M4 | Windows laptop |
+|---|---|---|---|
+| CPU | AMD Ryzen AI Max+ PRO 395, 16 cores | Apple M4, 10 cores (4 performance, 6 efficiency) | AMD Ryzen 7 5800H, 8 cores |
+| GPU | AMD Radeon 8060S, built-in, HIP | Apple M4, 8 cores, built-in, Metal | NVIDIA RTX 3060 Laptop, 6 GB, HIP |
+| Main memory, OS | 107 GB, Linux | 16 GB, macOS 26 | 32 GB, Windows 11 |
+| openEMS | v0.37.0-33-g53a4264 | v0.37.0-32-gec4d2db | v0.37.0-38-gd686f1d (Windows test package) |
+| GPU speed | 1,807 MC/s | 640 MC/s | 1,456 MC/s |
+| CPU speed | 451–455 MC/s (6 threads, automatic) | 160–175 MC/s (4 threads, automatic) | 64–69 MC/s (automatic threads) |
+| Solve time per excitation (CPU / GPU) | 43 and 44 s / 13 and 13 s | 112 and 118 s / 32 and 33 s | 278 and 299 s / 21 and 20 s |
+| Timesteps per excitation (CPU / GPU) | 51,662 / 51,662 | 52,629 and 51,636 / 51,662 | 51,636 / 51,662 |
 
-Each engine ran once, one after the other. The MacBook Air has no fan, so long runs can be slowed down by thermal throttling.
+All machines: mesh 112 × 89 × 36 = 0.36 M cells, smallest cell 1.44 × 1.25 × 0.40 µm, Gaussian pulse 20–100 GHz, timestep 1.26 fs, end criterion −40 dB. Each engine ran once, one after the other. The MacBook Air has no fan, so long runs can be slowed down by its temperature. The hpz2 and laptop results are not in the repository.
