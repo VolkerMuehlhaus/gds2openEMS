@@ -2,6 +2,20 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 26-Oct-2026
+
+New command `convert2settings`: converts model scripts in the older loose-variable syntax (`fstart = 0e9`, ..., `setupSimulation(excite_ports, simulation_ports, FDTD, ...)`) to the `settings[]` syntax of the current examples, and switches the imports of a local `modules` folder to the installed gds2openEMS package.
+
+```
+convert2settings my_model.py
+convert2settings my_model.py --engine gpu       # also run on the GPU
+convert2settings models_folder --dry-run        # show the changes, write nothing
+```
+
+The converted model is written to `my_model_settings.py` next to the original; the original and existing files are never overwritten. A variable is only moved into `settings[]` when its meaning is certain, everything else stays a variable, and models that can't be converted safely are refused with the reason. See [Converting older models](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#converting-older-models-to-the-settings-syntax) in the user's guide.
+
+Version 0.6.5.
+
 ## 24-Oct-2026
 
 **Bugfix:** with `settings['resonance_estimation'] = True`, numpy could print "RuntimeWarning: overflow encountered in power" during a run. The results were not affected. The warning no longer appears.

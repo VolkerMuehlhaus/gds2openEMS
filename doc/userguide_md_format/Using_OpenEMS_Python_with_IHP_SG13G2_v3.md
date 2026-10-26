@@ -13,6 +13,7 @@ Document version: 2026-09-02 (v3)
 &ensp;[Alternative, no longer recommended: local modules copy](#alternative-no-longer-recommended-local-modules-copy)
 [Required software and Python modules](#required-software-and-python-modules)
 [Model configuration syntax: settings{} dict vs. loose variables](#model-configuration-syntax-settings-dict-vs-loose-variables)
+&ensp;[Converting older models to the settings syntax](#converting-older-models-to-the-settings-syntax)
 [Quick tour](#quick-tour)
 &ensp;[Minimum configuration](#minimum-configuration)
 &ensp;[Input files](#input-files)
@@ -124,6 +125,31 @@ Model scripts pass their configuration to `setupSimulation()`/`runSimulation()` 
 - **Loose top-level variables** (`fstart = 0e9`, `refined_cellsize = 1`, ...) passed individually and positionally — the original style, still fully supported. `more_examples/local_modules_copy/run_line_viaport.py` is a current example of it.
 
 The rest of this guide shows the `settings{}` style, since that's what all current `workflow/` examples use; anywhere it says `settings['xyz'] = ...`, the loose-variable style has an equivalent plain `xyz = ...` passed positionally instead.
+
+### Converting older models to the settings syntax
+
+The command `convert2settings` (installed with gds2openEMS 0.6.5 or newer) converts a model script from the loose-variable syntax to the `settings{}` syntax:
+
+```
+convert2settings my_model.py
+```
+
+It writes `my_model_settings.py` next to the original. The original is not changed, and an existing `my_model_settings.py` is not overwritten.
+
+- Loose variables become `settings['...']` entries, and the `setupSimulation()` / `runSimulation()` calls get `settings=settings`.
+- A model that imports a local `modules` folder is switched to the installed gds2openEMS package, and the `sys.path` line for that folder is removed. The converted model then uses the current workflow, not the old copy.
+- The `max_cellsize` calculation is removed when it is the same as the one in `setupSimulation()`, which then does it.
+- A variable is only moved into `settings[]` when its meaning is certain, because it is passed to a workflow function or used in one of the standard expressions such as `SetGaussExcite()`. File names and other variables stay as they are. A model that can't be converted safely is refused, with the reason.
+
+Options:
+
+| Option | Effect |
+|---|---|
+| `--engine gpu` | adds `settings['engine'] = 'gpu'`, see [Running on the GPU](#running-on-the-gpu) |
+| `--dry-run` | shows the changes, writes nothing |
+| `--json` | prints a detailed report in JSON |
+
+Several files or whole folders can be given at once (`convert2settings folder` converts all `*.py` files in it). Check the converted model in the AppCSXCAD preview before the first run: because it uses the current workflow, its results can differ slightly from those of an old `modules` copy.
 
 ## Quick tour
 
