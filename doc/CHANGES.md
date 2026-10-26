@@ -2,13 +2,7 @@
 
 This is an (incomplete) list of changes and new features.
 
-## 24-Oct-2026
-
-**Bugfix:** with `settings['resonance_estimation'] = True`, numpy could print "RuntimeWarning: overflow encountered in power" during a run. The results were not affected. The warning no longer appears.
-
-Version 0.6.4.
-
-## 23-Oct-2026
+## 26-Oct-2026
 
 New option `settings['engine']` to choose the openEMS engine, e.g. the new GPU engine of openEMS (Metal on macOS, HIP on AMD and NVIDIA GPUs):
 
@@ -18,9 +12,24 @@ settings['engine'] = 'gpu'
 
 Without it, nothing changes: openEMS uses its default multithreaded CPU engine. The GPU engine is not in an openEMS release yet (v0.37.0 doesn't have it): openEMS has to be built from its current source code. openEMS without the GPU engine ignores `'gpu'` and runs on the CPU; gds2openEMS warns about that. See [Running on the GPU](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#running-on-the-gpu) in the user's guide.
 
+New tool `convert2settings`: converts model scripts in the older loose-variable syntax (`fstart = 0e9`, ..., `setupSimulation(excite_ports, simulation_ports, FDTD, ...)`) to the `settings[]` syntax of the current examples, and switches the imports of a local `modules` folder to the installed gds2openEMS package.
+
+It is installed together with gds2openEMS. Run it in a terminal (Windows: Command Prompt or PowerShell) in which the Python environment with gds2openEMS is active, the same one you use to run your models, for example:
+
+```
+convert2settings my_model.py
+convert2settings my_model.py --engine gpu       # also run on the GPU
+convert2settings models_folder --dry-run        # show the changes, write nothing
+convert2settings --gui my_model.py              # preview side by side in a window, then convert
+```
+
+The converted model is written to `my_model_settings.py` next to the original; the original and existing files are never overwritten. A variable is only moved into `settings[]` when its meaning is certain, everything else stays a variable, and models that can't be converted safely are refused with the reason. See [Converting older models](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#converting-older-models-to-the-settings-syntax) in the user's guide.
+
 **Bugfix:** if openEMS failed during setup, gds2openEMS still reported "FDTD simulation completed successfully". It now stops with an error.
 
-Version 0.6.3.
+**Bugfix:** with `settings['resonance_estimation'] = True`, numpy could print "RuntimeWarning: overflow encountered in power" during a run. The results were not affected. The warning no longer appears.
+
+Version 0.6.5 (the GPU option and both bugfixes were already in 0.6.4).
 
 ## 22-Oct-2026
 

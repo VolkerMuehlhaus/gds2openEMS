@@ -28,6 +28,7 @@ Changelog = "https://github.com/VolkerMuehlhaus/gds2openEMS/blob/main/doc/CHANGE
 
 [project.scripts]
 stackupEditor = "stackup_editor.stackupEditor:main"
+convert2settings = "gds2openEMS.convert2settings:main"
 
 [tool.setuptools.dynamic]
 version = {attr = "gds2openEMS.__version__"}
