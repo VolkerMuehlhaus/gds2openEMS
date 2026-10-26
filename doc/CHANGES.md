@@ -12,7 +12,9 @@ settings['engine'] = 'gpu'
 
 Without it, nothing changes: openEMS uses its default multithreaded CPU engine. The GPU engine is not in an openEMS release yet (v0.37.0 doesn't have it): openEMS has to be built from its current source code. openEMS without the GPU engine ignores `'gpu'` and runs on the CPU; gds2openEMS warns about that. See [Running on the GPU](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#running-on-the-gpu) in the user's guide.
 
-New command `convert2settings`: converts model scripts in the older loose-variable syntax (`fstart = 0e9`, ..., `setupSimulation(excite_ports, simulation_ports, FDTD, ...)`) to the `settings[]` syntax of the current examples, and switches the imports of a local `modules` folder to the installed gds2openEMS package.
+New tool `convert2settings`: converts model scripts in the older loose-variable syntax (`fstart = 0e9`, ..., `setupSimulation(excite_ports, simulation_ports, FDTD, ...)`) to the `settings[]` syntax of the current examples, and switches the imports of a local `modules` folder to the installed gds2openEMS package.
+
+It is installed together with gds2openEMS. Run it in a terminal (Windows: Command Prompt or PowerShell) in which the Python environment with gds2openEMS is active, the same one you use to run your models, for example:
 
 ```
 convert2settings my_model.py

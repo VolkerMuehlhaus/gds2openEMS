@@ -128,10 +128,22 @@ The rest of this guide shows the `settings{}` style, since that's what all curre
 
 ### Converting older models to the settings syntax
 
-The command `convert2settings` (installed with gds2openEMS 0.6.5 or newer) converts a model script from the loose-variable syntax to the `settings{}` syntax:
+The tool `convert2settings` converts a model script from the loose-variable syntax to the `settings{}` syntax. It is installed together with gds2openEMS (version 0.6.5 or newer) and runs in a terminal:
+
+1. Open a terminal (Windows: Command Prompt or PowerShell).
+2. Activate the Python environment in which gds2openEMS is installed, the same one you use to run your models, e.g. `source ~/venv/openems/bin/activate` on Linux and macOS, or `C:\venv\openems\Scripts\activate` on Windows (use your own environment folder).
+3. Go to the folder of the model and run:
 
 ```
 convert2settings my_model.py
+```
+
+If the terminal reports that `convert2settings` is not found, the environment is not active, or its gds2openEMS is older than 0.6.5. `python -m gds2openEMS.convert2settings my_model.py` does the same and also works without the `Scripts` / `bin` folder in the search path.
+
+To see the changes in a window first, with the original and the converted model side by side, add `--gui`:
+
+```
+convert2settings --gui my_model.py
 ```
 
 It writes `my_model_settings.py` next to the original. The original is not changed, and an existing `my_model_settings.py` is not overwritten.
