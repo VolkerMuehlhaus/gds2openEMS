@@ -145,6 +145,7 @@ Options:
 
 | Option | Effect |
 |---|---|
+| `--gui` | opens a window that shows the original and the converted model side by side, with the changed lines marked and each variable's reason, before anything is written |
 | `--engine gpu` | adds `settings['engine'] = 'gpu'`, see [Running on the GPU](#running-on-the-gpu) |
 | `--dry-run` | shows the changes, writes nothing |
 | `--json` | prints a detailed report in JSON |

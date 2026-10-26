@@ -347,3 +347,31 @@ def test_missing_package_is_refused(tmp_path):
     r = report(model, package_dir=tmp_path / "missing")
     assert not r["ok"]
     assert "not installed" in r["reason"]
+
+
+def test_gui_preview_and_convert(tmp_path, monkeypatch):
+    """The window shows the conversion, Convert writes <name>_settings.py once."""
+    pytest.importorskip("PySide6")
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from gds2openEMS import convert2settings_gui as gui
+
+    model = make_case(tmp_path)
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: None)
+    w = gui.ConvertWindow([str(model)], package_dir=str(pkg(tmp_path)))
+    assert w.table.rowCount() == 15                    # 13 converted + 2 kept
+    assert w.diff.change_starts and w.diff.position.text().startswith("Change 1 of")
+    assert w.convert_button.isEnabled()
+
+    w.gpu.setChecked(True)                             # stand-in workflow reads no engine key
+    assert w.result is None and "can't be converted" in w.intro.text()
+    w.gpu.setChecked(False)
+
+    w._convert()
+    out = tmp_path / "model_settings.py"
+    assert out.exists() and not w.convert_button.isEnabled()
+    w.load()                                           # existing output: Convert stays off
+    assert not w.convert_button.isEnabled() and "already exists" in w.message.text()
+    w.close()
+    app.processEvents()

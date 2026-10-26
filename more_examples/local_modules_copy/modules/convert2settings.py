@@ -33,6 +33,7 @@ that the intended transformation gives.
 
 Usage:
     convert2settings model.py [more models or folders] [--engine gpu] [--dry-run] [--json]
+    convert2settings --gui [model.py ...]      window with a side-by-side preview
 
 Each model is written to <name>_settings.py next to it. The model itself is never written, and an
 existing <name>_settings.py is never overwritten.
@@ -1472,16 +1473,25 @@ def main(argv=None):
         description="Convert loose-variable gds2openEMS models to the settings[] syntax and the "
                     "gds2openEMS imports. Each model is written to <name>_settings.py next to it; "
                     "the model itself and existing files are never overwritten.")
-    p.add_argument("models", nargs="+", metavar="MODEL",
+    p.add_argument("models", nargs="*", metavar="MODEL",
                    help="model script(s), or folder(s) whose *.py files are converted")
     p.add_argument("--engine", choices=ENGINES,
                    help="set settings['engine'] in the converted model, e.g. gpu for the GPU engine")
     p.add_argument("--dry-run", action="store_true", help="show the changes, write nothing")
     p.add_argument("--json", action="store_true", help="print the full reports as JSON")
+    p.add_argument("--gui", action="store_true",
+                   help="open a window that shows the changes side by side before converting "
+                        "(needs PySide6); without MODEL it asks for a file")
     p.add_argument("--package-dir", help=argparse.SUPPRESS)      # for tests: another workflow
     p.add_argument("--signatures", help=argparse.SUPPRESS)       # for tests: a signatures CSV
     args = p.parse_args(argv)
     signatures = read_signatures(args.signatures) if args.signatures else None
+    if args.gui:
+        from . import convert2settings_gui    # PySide6 only for the window
+        return convert2settings_gui.run(collect(args.models), args.engine, args.package_dir,
+                                        signatures)
+    if not args.models:
+        p.error("give at least one MODEL, or use --gui")
 
     reports = []
     for model in collect(args.models):

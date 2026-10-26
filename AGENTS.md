@@ -151,7 +151,8 @@ variables (the older style) are still supported. Use the dictionary for new
 scripts.
 To convert an older script, run `convert2settings model.py` (writes
 `model_settings.py`, switches a local `modules` folder to the gds2openEMS
-imports; `--engine gpu` also sets the GPU engine). Its tests are in
+imports; `--engine gpu` also sets the GPU engine, `--gui` shows a side-by-side
+preview first). Its tests are in
 `tests/test_convert2settings.py` (`python -m pytest tests`).
 
 ### Template
