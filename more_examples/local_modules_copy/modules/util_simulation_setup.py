@@ -615,7 +615,9 @@ def addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_li
                     voltage = port.voltage        # only apply source voltage to ports that are excited in this simulation run
                 else:
                     voltage = 0                   # passive port in this simulation run
-                if port.reversed_direction:       # port direction changes polarity
+                if port.reversed_direction and port.target_layername != None:
+                    # in-plane port: polarity from the start/stop order along x or y
+                    # (a via port is reversed in z below, openEMS takes the sign from stop - start)
                     xmin = poly.xmax
                     xmax = poly.xmin
                     ymin = poly.ymax
@@ -699,7 +701,9 @@ def addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_li
                 all_port_information.append(port_information_data)
 
 
-                CSX_port = FDTD.AddLumpedPort(portnum, port_Z0, [xmin, ymin, zmin], [xmax, ymax, zmax], port_direction, voltage, priority=150)
+                # via port with '-z': from the upper to the lower metal, the opposite polarity of 'z'
+                zstart, zstop = (zmax, zmin) if (port.reversed_direction and port.target_layername == None) else (zmin, zmax)
+                CSX_port = FDTD.AddLumpedPort(portnum, port_Z0, [xmin, ymin, zstart], [xmax, ymax, zstop], port_direction, voltage, priority=150)
                 # store CSX_port in the port object, for evaluation later
                 port.set_CSXport(CSX_port)
                     

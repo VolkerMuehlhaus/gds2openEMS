@@ -236,7 +236,7 @@ A skipped port's S-parameters are simply not computed. If you then try to write 
 
 The port can be mapped to a metal layer as shown here, with x or y orientation, but it can also be mapped to a via layer and used in z direction, if necessary. This gives maximum flexibility in creating EM ports.
 
-The port direction also supports reverse polarity, by adding a minus sign to the direction. This can be required to place the reference terminal on the correct side, as shown in the example below.
+The port direction also supports reverse polarity, by adding a minus sign to the direction. This can be required to place the reference terminal on the correct side, as shown in the example below. A via port with `'z'` runs from its lower to its upper metal, whatever the order of `from_layername` and `to_layername`; `'-z'` reverses it. Use the same orientation for all ports of a model, for example `'-z'` where the signal metal is below its reference metal.
 
 ![Example for polarity in port direction](./images/port_direction_polarity.png)
 
