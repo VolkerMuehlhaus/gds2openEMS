@@ -2,6 +2,14 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 31-Oct-2026 (next version)
+
+**Bugfix: ports that excite nothing.** A lumped port acts only on the mesh edges inside its box. A via port drawn as a zero-width line needs a mesh line exactly in its plane, and the xy mesh could lose it: lines closer than 0.8 × `refined_cellsize` are merged, and two port edges of equal weight were replaced by one line in the middle, e.g. the planes of two ports 0.1 µm apart. Such a port injected no energy, its probes stayed 0, and openEMS never reached `energy_limit`. Found with a 15-port export from the KLayout plug-in klayout_em_export, where 3 ports were dead at `refined_cellsize` 0.5. After the xy mesh, every port without a mesh line in x or y now gets one, at its center or in the plane of a zero-width port ("Port meshing: added N mesh line(s)"). Other ports and the rest of the mesh are unchanged.
+
+**Ports with different reference impedances:** S-parameters are now ratios of power waves, `S_ij = uf_ref_i / uf_inc_j · sqrt(Z0_j / Z0_i)` (`utilities.power_wave_ratio()`). Before, the plain ratio of voltage waves gave wrong values when the ports had different `port_Z0`, e.g. S21 ≠ S12 for a plain connection between a 50 Ω and a 25 Ω port. With equal impedances nothing changes. `simulation_ports.get_reference_impedance()` returns one value as before when all ports have the same `port_Z0`, else the list of port impedances, and `utilities.write_snp()` then writes a Touchstone 2.0 file with a `[Reference]` line (Touchstone 1.0 has only one reference impedance). Before, `get_reference_impedance()` stopped the script with "All ports must use the same reference impedance". The Y and Z parameter functions still require equal impedances.
+
+Tests: `tests/test_port_meshing.py`.
+
 ## 31-Oct-2026 (0.6.7)
 
 **Ports with several polygons:** several separate polygons on one port layer are now the elements of one port, in parallel, e.g. for a terminal on several transistor fingers. Each element gets N·Z0, so the port is terminated with Z0; the port voltage is the mean of the element voltages, the port current their sum. Touching polygons are one element. Before, every polygon became a port of its own with the same number: openEMS stopped with "a probe named port_ut_1 already exists", or, in older openEMS versions, ran with the port terminated by Z0/N and wrong S-parameters. Resonance estimation and `deembed_openEMS.py` (element inductances in parallel) know the elements. See "Ports with several polygons" in the user's guide.
