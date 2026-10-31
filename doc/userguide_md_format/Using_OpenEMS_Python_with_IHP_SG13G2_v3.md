@@ -2,7 +2,7 @@
 
 Volker Mühlhaus, volker@muehlhaus.com
 ---
-Document version: 2026-09-02 (v3)
+Document version: 2026-10-31 (v3)
 
 ## Contents
 [What's New](#whats-new)
@@ -248,6 +248,12 @@ The GSG port on each end of the line consists of 2 port definitions each, with o
 
 `run_line_GSG_complex.py` shows the manual approach: simulate the underlying EM ports together, then combine their results in your own post-processing code.
 
+**Ports with several polygons.** Several separate polygons on one port layer are the elements of one port, in parallel. Use this for a terminal that is spread over several strips, for example the source or drain fingers of a transistor. Each element is an openEMS lumped port with the resistance N·Z0 for N elements, so the elements in parallel terminate the port with Z0, and all elements are excited together. The port voltage is the mean of the element voltages, the port current the sum of the element currents; the S-parameters are calculated from these with the port's Z0, as for a single polygon.
+
+Polygons on one port layer that touch or overlap are one element, with their common bounding box: two lumped ports on a shared edge would both act on that edge. setupSimulation() reports when it combines polygons.
+
+Checked with `run_line_viaport.py`'s line, its ports drawn as one polygon or as two polygons with a 1 µm gap, on the same mesh: the S-parameters agree within |ΔS| 0.003 from 0 to 110 GHz, also with resonance estimation. Before gds2openEMS 0.6.7, every polygon became a port of its own with the same number: openEMS stopped with an error about a duplicate probe name, or, in older versions, ran with the port terminated by Z0/N.
+
 ### Meshing
 
 The default in all examples is **automatic meshing based on geometry**: mesh lines are placed to follow polygon edges and diagonal features. Lines that end up too close together are then merged or removed, since they would slow simulation without adding accuracy. `settings['refined_cellsize']` sets the target mesh resolution at conductor edges. `settings['cells_per_wavelength']` sets the coarse mesh size elsewhere in the model: the maximum cell size is the wavelength at `fstop` in the densest dielectric, divided by `cells_per_wavelength`.
@@ -422,7 +428,7 @@ This workflow creates **lumped ports**, which introduce some physical length/are
 python3 deembed_openEMS.py inputfile.s2p
 ```
 
-Output is written to a new file with suffix `_deembedded`. This works for any port count, but the method is approximate and **not applicable to composite port configurations** like `run_line_GSG_complex.py`'s GSG ports — treat it as a useful estimate, not a precise correction.
+Output is written to a new file with suffix `_deembedded`. This works for any port count, but the method is approximate and **not applicable to composite port configurations** like `run_line_GSG_complex.py`'s GSG ports — treat it as a useful estimate, not a precise correction. For a port with several polygons, `port_information.json` has one entry per element, and the script takes the element inductances in parallel.
 
 ## Advanced topics
 

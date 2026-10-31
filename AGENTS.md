@@ -292,6 +292,10 @@ distance; shielded structures can use `PEC`.
   file. `run_line_viaport.py` excites only port 1 and copies S11/S21 to
   S22/S12, assuming a symmetric structure: only do that if the structure
   really is symmetric.
+- Several separate polygons on one port layer are the elements of one port, in
+  parallel (e.g. a terminal on several transistor fingers): each gets N·Z0, the
+  port is terminated with Z0, port voltage = mean, current = sum (0.6.7+).
+  Touching polygons are one element. Before 0.6.7 this did not work.
 - Composite ports (e.g. GSG) are made from several ports and combined in the
   script's own post-processing: see `run_line_GSG_complex.py`.
 - Lumped ports add some series inductance. `python scripts/deembed_openEMS.py result.s2p`

@@ -56,7 +56,10 @@ def port_deembedding (snp_filename, port_info_available, port_info_data):
             if (length is not None) and (width is not None) and (portnum is not None):
                 thickness = 0 # Palace ports are 2D sheets with no thickness
                 L = flat_strip_inductance(length, width, thickness, unit)
-                # store into dict for this port number, just in case the port numbers in the file are in wrong sorting order
+                # store into dict for this port number, just in case the port numbers in the file are in wrong sorting order;
+                # a multielement port has one entry per element: the elements are in parallel, so are their inductances
+                if str(portnum) in Lport:
+                    L = 1.0 / (1.0 / Lport[str(portnum)] + 1.0 / L)
                 Lport[str(portnum)]=L
 
         # load SnP data and apply negative series L at each port
