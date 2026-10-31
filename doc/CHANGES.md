@@ -2,7 +2,11 @@
 
 This is an (incomplete) list of changes and new features.
 
-## 31-Oct-2026
+## 31-Oct-2026 (0.6.7)
+
+**Ports with several polygons:** several separate polygons on one port layer are now the elements of one port, in parallel, e.g. for a terminal on several transistor fingers. Each element gets N·Z0, so the port is terminated with Z0; the port voltage is the mean of the element voltages, the port current their sum. Touching polygons are one element. Before, every polygon became a port of its own with the same number: openEMS stopped with "a probe named port_ut_1 already exists", or, in older openEMS versions, ran with the port terminated by Z0/N and wrong S-parameters. Resonance estimation and `deembed_openEMS.py` (element inductances in parallel) know the elements. See "Ports with several polygons" in the user's guide.
+
+## 31-Oct-2026 (0.6.6)
 
 **Bugfix:** `direction='-z'` did not reverse a via port: the sign only swapped the port's x and y extent, and the port
 kept the polarity of `'z'`. A via port with `'-z'` now runs from its upper to its lower metal, the opposite polarity of

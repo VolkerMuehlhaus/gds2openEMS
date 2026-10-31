@@ -98,20 +98,45 @@ def _read_probe(filename):
     return np.array(t), np.array(x)
 
 
-def _probe_files(excitation_path, ports):
-    return [(i, q, os.path.join(excitation_path, f'port_{q}t_{i}')) for i in ports for q in ('u', 'i')]
+def _probe_name(key):
+    """openEMS probe file name for a signal key: (port, 'u'|'i'), or (port, 'u'|'i', element) for an element of a
+    multielement port (probe names with the prefix e<element>_, see util_simulation_setup.MultiElementPort)."""
+    i, q = key[0], key[1]
+    return (f'e{key[2]}_' if len(key) > 2 else '') + f'port_{q}t_{i}'
 
 
-def read_signals(excitation_path, ports):
-    """{(port, 'u'|'i'): (t, x)} of one excitation, or None while files are missing or empty."""
+def _probe_files(excitation_path, ports, elements=None):
+    keys = []
+    for i in ports:
+        n = (elements or {}).get(i, 1)
+        keys += [(i, q) if n == 1 else (i, q, k) for k in range(1, n + 1) for q in ('u', 'i')]
+    return [(key, os.path.join(excitation_path, _probe_name(key))) for key in keys]
+
+
+def combine_elements(sig):
+    """The signals with the elements of each multielement port combined into the port's own signals: voltage =
+    mean of the element voltages, current = sum of the element currents. Both are linear, so the S-parameters are
+    the same, and the monitor fits one voltage and one current per port instead of one per element."""
+    out = {k: v for k, v in sig.items() if len(k) == 2}
+    for i, q in {k[:2] for k in sig if len(k) > 2}:
+        parts = [v for k, v in sig.items() if len(k) > 2 and k[:2] == (i, q)]
+        n = min(len(x) for _, x in parts)
+        x = np.sum([x[:n] for _, x in parts], axis=0)
+        out[(i, q)] = (parts[0][0][:n], x / len(parts) if q == 'u' else x)
+    return out
+
+
+def read_signals(excitation_path, ports, elements=None):
+    """{(port, 'u'|'i'[, element]): (t, x)} of one excitation, or None while files are missing or empty.
+    elements: {port: number of elements} for multielement ports."""
     sig = {}
-    for i, q, fn in _probe_files(excitation_path, ports):
+    for key, fn in _probe_files(excitation_path, ports, elements):
         if not os.path.exists(fn):
             return None
         t, x = _read_probe(fn)
         if len(t) < 3:
             return None
-        sig[(i, q)] = (t, x)
+        sig[key] = (t, x)
     return sig
 
 
@@ -129,6 +154,17 @@ def read_port_information(sim_path):
     with open(os.path.join(sim_path, 'port_information.json'), 'r', encoding='utf-8') as f:
         info = json.load(f)
     return {p['portnumber']: p['Z0'] for p in info['ports']}
+
+
+def read_port_elements(sim_path):
+    """{port number: number of elements} of the multielement ports in port_information.json."""
+    with open(os.path.join(sim_path, 'port_information.json')) as f:
+        info = json.load(f)
+    count = {}
+    for p in info['ports']:
+        if 'element' in p:
+            count[p['portnumber']] = count.get(p['portnumber'], 0) + 1
+    return count
 
 
 def remove_results(excitation_path):
@@ -357,6 +393,10 @@ def _dft(t, x, freqs):
 def _column(sig, excited, z0, freqs, band):
     """b_i / a_excited for all ports: the S-parameter column for a single excited port."""
     U = {k: _dft(*v, freqs) for k, v in sig.items()}
+    # a multielement port: voltage = mean of the element voltages, current = sum of the element currents
+    for i in {k[0] for k in sig if len(k) > 2}:
+        U[(i, 'u')] = np.mean([v for k, v in U.items() if len(k) > 2 and k[:2] == (i, 'u')], axis=0)
+        U[(i, 'i')] = np.sum([v for k, v in U.items() if len(k) > 2 and k[:2] == (i, 'i')], axis=0)
     a = 0.5 * (U[(excited, 'u')] + z0[excited] * U[(excited, 'i')])
     ports = sorted({k[0] for k in sig})
     col = np.array([0.5 * (U[(i, 'u')] - z0[i] * U[(i, 'i')]) / a for i in ports])
@@ -445,6 +485,7 @@ class Monitor(threading.Thread):
         try:
             self.z0 = read_port_information(self.sim_path)
             self.ports = sorted(self.z0)
+            self.elements = read_port_elements(self.sim_path)
             exc = None
             last_n = 0
             cache = {}
@@ -456,9 +497,10 @@ class Monitor(threading.Thread):
                     te, e = exc
                     t_free = te[np.where(abs(e) > abs(e).max() * 10**(FREE_DECAY_DB / 20))[0][-1]]
                     freqs = band = None
-                sig = read_signals(self.excitation_path, self.ports)
+                sig = read_signals(self.excitation_path, self.ports, self.elements)
                 if sig is None:
                     continue
+                sig = combine_elements(sig)   # one voltage and one current per port: cheaper fits
                 n = min(len(t) for t, _ in sig.values())
                 t = next(iter(sig.values()))[0]
                 if t[n - 1] < t_free or n < 3 * LAG + 10:
@@ -505,6 +547,7 @@ def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
     Writes a log in the excitation folder."""
     z0 = read_port_information(sim_path)
     ports = sorted(z0)
+    elements = read_port_elements(sim_path)
     excited = excite_portnumbers[0]
     log = [f'Resonance estimation for excitation {excite_portnumbers}']
     stopped_early = monitor is not None and monitor.stop_reason is not None
@@ -518,7 +561,7 @@ def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
     ok = False
     try:
         exc = read_excitation(excitation_path)
-        sig = read_signals(excitation_path, ports)
+        sig = read_signals(excitation_path, ports, elements)
         if exc is None or sig is None:
             raise RuntimeError('no openEMS probe data found')
         te, e = exc
@@ -545,9 +588,9 @@ def finalize(sim_path, excitation_path, excite_portnumbers, monitor=None):
 def _write_extended(excitation_path, ext, sig):
     folder = os.path.join(excitation_path, RESULT_FOLDER)
     os.makedirs(folder, exist_ok=True)
-    for (i, q), (tt, xx) in ext.items():
-        kind = 'voltage' if q == 'u' else 'current'
-        with open(os.path.join(folder, f'port_{q}t_{i}'), 'w') as f:
+    for key, (tt, xx) in ext.items():
+        kind = 'voltage' if key[1] == 'u' else 'current'
+        with open(os.path.join(folder, _probe_name(key)), 'w') as f:
             f.write(f'% {kind} probe, extended by gds2openEMS resonance estimation beyond '
-                    f'{sig[(i, q)][0][-1]:.6e} s\n% t/s\t{kind}\n')
+                    f'{sig[key][0][-1]:.6e} s\n% t/s\t{kind}\n')
             np.savetxt(f, np.column_stack([tt, xx]), fmt='%.12e', delimiter='\t')
