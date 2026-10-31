@@ -2,6 +2,17 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 31-Oct-2026
+
+**Bugfix:** `direction='-z'` did not reverse a via port: the sign only swapped the port's x and y extent, and the port
+kept the polarity of `'z'`. A via port with `'-z'` now runs from its upper to its lower metal, the opposite polarity of
+`'z'`. In-plane ports (`'-x'`, `'-y'`) are unchanged. Models that use `'-z'` get the opposite sign for that port's
+S-parameters than before.
+
+The `core_transistor_3port_bce` example now explains how to use the 5-port result in a circuit simulator: the
+transistor model at ports 3, 4 and 5, inductors for the DC bias, and the 0 Hz point. See
+[its README](../more_examples/core_transistor_3port_bce/README.md#using-the-result-in-a-circuit-simulator).
+
 ## 26-Oct-2026
 
 New option `settings['engine']` to choose the openEMS engine, e.g. the new GPU engine of openEMS (Metal on macOS, HIP on AMD and NVIDIA GPUs):
