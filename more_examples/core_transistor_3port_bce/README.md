@@ -38,6 +38,60 @@ which is what makes a genuine 3-terminal port set at the device possible.
 
 Note: the ports have been created with zero xy area (i.e. vertical sheet) because that was a requirement in the original gds2palace example. If you prefer that, you can also create ports with finite xy area in gds2palace, i.e. ports represented as volumes in the FDTD solver.
 
+## Using the result in a circuit simulator
+
+The 5-port S-parameters describe the interconnect only. The transistor itself is not in the EM model: in a circuit
+simulator, the foundry model (here npn13G2 from the IHP SG13G2 PDK) goes back in at ports 3, 4 and 5, together with
+three inductors for the DC bias (explained below):
+
+![Circuit wiring of the 5-port result](png/circuit_wiring.png)
+
+**Wiring.** Use the S-parameters directly (an S-parameter block) or an equivalent circuit made from them (for example
+by vector fitting). Either way, each port is referenced to ground. Then:
+
+- Ports 1 and 2 are the RF pads: they connect to the outside circuit.
+- The transistor's base, collector and emitter connect directly to ports 3, 4 and 5. Its substrate pin goes to
+  ground.
+
+This grounds the `REF_FOR_TRANSISTOR` sheet. In the EM model the sheet floats: it touches only the three ports. Wiring
+the transistor directly adds the sheet's own capacitance to ground, a few fF. In a cascode test with two npn13G2
+(Nx = 8, simulated with gds2palace), this lowered S21 by 0.06 dB at 10 GHz and 0.4 dB at 200 GHz. To keep the sheet
+floating instead, couple each of the three ports through an ideal 1:1 transformer (a voltage-controlled voltage source
+plus a current-controlled current source) to a common node for the transistor.
+
+**DC bias.** A port measures a voltage difference, between a terminal and the reference sheet. At DC the sheet has
+no connection, so the EM model does not fix the transistor's potential as a whole. Tie each transistor terminal to
+the port of the same net with a large inductor (for example 1 mH: a short at DC, open at RF):
+
+- port 3 (base) to port 1 (left pad),
+- port 4 (collector) to port 2 (right pad),
+- port 5 (emitter) to ground, since the emitter is on the Metal3 ground plane.
+
+The bias is then applied at the pads, for example through bias tees in the testbench.
+
+**DC point of the S-parameters.** The script runs from `fstart = 0`, so the `.s5p` file starts with a 0 Hz point
+from the FDTD run itself. In this example's result, that point matches the layout's DC connections within 0.003 in S,
+and each signal net leaks about 130 kΩ to the rest. That is fine for a bias from low-impedance sources at the pads.
+For a bias network with kΩ resistors, connect the S-parameter model through DC blocks (for example 1 µF at each port),
+so that only the inductors carry the bias.
+
+**Port polarity.** With `direction='z'`, gds2openEMS builds a via port from its lower to its upper metal, whatever
+the order of `from_layername` and `to_layername`, and `'-z'` reverses it. In this example the signal metal is on top
+at every port (TopMetal2 over Metal3, Metal2 over the reference sheet), so `'z'` is right for all of them. For a port
+whose signal metal is below its reference metal, use `'-z'`, so that all ports have the same orientation.
+
+A minimal ngspice subcircuit (`em5` is the equivalent circuit of the 5-port, pins in port order):
+
+```spice
+.subckt core pad1 pad2
+XEM pad1 pad2 b c e em5
+XQ c b e 0 npn13G2 <parameters of the transistor in the layout>
+Lb pad1 b 1m        ; DC ties, open at RF
+Lc pad2 c 1m
+Le e 0 1m
+.ends core
+```
+
 ## Stackup (`SG13G2_100um_bce_ports.xml`)
 
 This stackup is the full IHP SG13G2 metal/via stack from this repo's
