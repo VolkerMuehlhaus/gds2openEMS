@@ -760,8 +760,10 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
 
 
     # iterate over XML technology metal layers and (optional) dielectric layer boundary spec
-    extended_layer_list = layerlist
-    extended_layer_list.extend(gds_boundary_layers)
+    # each GDS layer number once: several stackup layers can use one GDS layer (e.g. MIM and MIM_DK on 36),
+    # and every polygon read is given to all of them later (getallbylayernumber); reading the layer again
+    # would put each polygon into the model twice. A new list: the caller's layerlist is not changed.
+    extended_layer_list = list(dict.fromkeys(list(layerlist) + list(gds_boundary_layers)))
 
     for layer_to_extract in extended_layer_list:
       

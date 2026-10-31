@@ -2,13 +2,15 @@
 
 This is an (incomplete) list of changes and new features.
 
-## 31-Oct-2026 (next version)
+## 31-Oct-2026 (0.6.8)
 
 **Bugfix: ports that excite nothing.** A lumped port acts only on the mesh edges inside its box. A via port drawn as a zero-width line needs a mesh line exactly in its plane, and the xy mesh could lose it: lines closer than 0.8 × `refined_cellsize` are merged, and two port edges of equal weight were replaced by one line in the middle, e.g. the planes of two ports 0.1 µm apart. Such a port injected no energy, its probes stayed 0, and openEMS never reached `energy_limit`. Found with a 15-port export from the KLayout plug-in klayout_em_export, where 3 ports were dead at `refined_cellsize` 0.5. After the xy mesh, every port without a mesh line in x or y now gets one, at its center or in the plane of a zero-width port ("Port meshing: added N mesh line(s)"). Other ports and the rest of the mesh are unchanged.
 
 **Ports with different reference impedances:** S-parameters are now ratios of power waves, `S_ij = uf_ref_i / uf_inc_j · sqrt(Z0_j / Z0_i)` (`utilities.power_wave_ratio()`). Before, the plain ratio of voltage waves gave wrong values when the ports had different `port_Z0`, e.g. S21 ≠ S12 for a plain connection between a 50 Ω and a 25 Ω port. With equal impedances nothing changes. `simulation_ports.get_reference_impedance()` returns one value as before when all ports have the same `port_Z0`, else the list of port impedances, and `utilities.write_snp()` then writes a Touchstone 2.0 file with a `[Reference]` line (Touchstone 1.0 has only one reference impedance). Before, `get_reference_impedance()` stopped the script with "All ports must use the same reference impedance". The Y and Z parameter functions still require equal impedances.
 
-Tests: `tests/test_port_meshing.py`.
+**GDSII layers read once:** in the SG13G2 stackups, GDS layer 36 makes two stackup layers (the MIM top plate and the MIM dielectric below it), and every polygon is given to both. `read_gds()` read such a layer once per stackup layer, so every MIM polygon was in the model twice, and openEMS warned "Unused primitive ... MIM_equiv" and "... TopVia1" for the second copies. Now each GDS layer number is read once. The S-parameters do not change (MIM capacitor example: identical). `read_gds()` also no longer adds `gds_boundary_layers` to the caller's layer list. `more_examples/local_modules_copy` is synced with `workflow/modules` again.
+
+Tests: `tests/test_port_meshing.py`, `tests/test_gds_reader_layers.py`.
 
 ## 31-Oct-2026 (0.6.7)
 
