@@ -282,7 +282,11 @@ distance; shielded structures can use `PEC`.
 - **In-plane port**: `target_layername`, `direction='x'`, `'-x'`, `'y'` or
   `'-y'`.
 - The sign of `direction` sets the polarity. `port_Z0` is the port reference
-  impedance.
+  impedance. Ports may use different `port_Z0`: `write_snp()` then writes
+  Touchstone 2.0 with a `[Reference]` line (one value per port).
+- A port acts only on the mesh edges inside it. After the xy mesh, a port with
+  no mesh line in x or y gets one (in the plane of a zero-width via port), see
+  `util_meshlines.add_port_mesh_lines()`.
 - **`voltage=0` only skips a port's run if the script builds its excitation
   list with `simulation_ports.all_active_excitations()`**, as the template
   does. Many examples hardcode the list (e.g. `[1]` or `[[1], [2]]`); there,
@@ -374,6 +378,7 @@ These are design decisions that the files can't tell you:
 | Field dump covers the whole layout | Dump layer not read: `layernumbers.extend(field_dumps.dumplayers)` before `read_gds()` |
 | Ripple in the S-parameters | `energy_limit` too high, or boundary reflections |
 | Very slow run | Tiny cells from thin layers or a too fine `refined_cellsize`, or `PML_8` boundaries |
+| One excitation runs forever with "Energy: ~0.00e+00" | That port excites nothing: no mesh edge inside it. Fixed by the port mesh lines (see Ports); with an older version, check the port's position against the mesh lines |
 | "Unused primitive (type: LinPoly)" warnings | Touching polygons on one layer; harmless |
 
 ## 9. Related tools

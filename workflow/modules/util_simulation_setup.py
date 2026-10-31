@@ -141,12 +141,12 @@ class all_simulation_ports:
       return self.ports[portnum-1]
 
   def get_reference_impedance (self):
-      # common port reference impedance for all ports, raises if ports differ
-      Z0 = self.ports[0].port_Z0
-      for port in self.ports[1:]:
-          if port.port_Z0 != Z0:
-              raise RuntimeError("All ports must use the same reference impedance.")
-      return Z0
+      # reference impedance for utilities.write_snp(): one value if all ports use the same, else the list of the
+      # port impedances in port number order (write_snp then writes Touchstone 2.0 with a [Reference] line)
+      impedances = [port.port_Z0 for port in sorted(self.ports, key=lambda p: p.portnumber)]
+      if all(z0 == impedances[0] for z0 in impedances):
+          return impedances[0]
+      return impedances
 
   def apply_layernumber_offset (self, offset):
       newportlayers = []    
@@ -814,6 +814,8 @@ def addMesh_to_CSX (CSX, allpolygons, dielectrics_list, metals_list, refined_cel
         mesh = xy_mesh_function (CSX, dielectrics_list, metals_list, refined_cellsize, max_cellsize, air_around, no_z_mesh_list, primitives_mesh_setup, properties_mesh_setup, settings)
     else:
         mesh = xy_mesh_function (mesh, allpolygons, margin, air_around, refined_cellsize, max_cellsize)
+        # every port needs a mesh line inside it in x and y, or it excites nothing
+        mesh, _ = util_meshlines.add_port_mesh_lines(mesh, allpolygons)
 
     return mesh
 
