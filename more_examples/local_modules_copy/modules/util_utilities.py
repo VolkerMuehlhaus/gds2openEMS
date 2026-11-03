@@ -69,6 +69,14 @@ def get_excitation_path (sim_path, ports, create=True):
 
 # ========================= S-parameter calculations  =============================
 
+def power_wave_ratio (uf_ref_i, uf_inc_j, z0_i, z0_j):
+    # S_ij from the voltage waves of two ports, each calculated with its own reference impedance (openEMS
+    # Port.CalcPort): S-parameters are ratios of power waves, b_i = uf_ref_i/sqrt(z0_i) and a_j = uf_inc_j/sqrt(z0_j),
+    # so S_ij = uf_ref_i/uf_inc_j * sqrt(z0_j/z0_i). The factor is 1 when both ports use the same reference impedance.
+    # Without it, a model with different port impedances is not even reciprocal (S21 != S12 for a plain connection).
+    return uf_ref_i / uf_inc_j * (z0_j / z0_i) ** 0.5
+
+
 def calculate_Sij (i, j, f, sim_path, simulation_ports):
     # S-parameter calculation for one element of the S matrix.
     # Returns None if port j was never excited - this is the normal case for a port with
@@ -88,14 +96,15 @@ def calculate_Sij (i, j, f, sim_path, simulation_ports):
     data_path = resonance_estimation.result_path(excitation_path) or excitation_path
 
     try:
-        CSX_port_i = simulation_ports.get_port_by_number(i).CSXport
-        CSX_port_i.CalcPort(data_path, f, simulation_ports.get_port_by_number(i).port_Z0)
+        port_i, port_j = simulation_ports.get_port_by_number(i), simulation_ports.get_port_by_number(j)
+        CSX_port_i = port_i.CSXport
+        CSX_port_i.CalcPort(data_path, f, port_i.port_Z0)
         if i==j:
             Sij = CSX_port_i.uf_ref  / CSX_port_i.uf_inc
         else:
-            CSX_port_j = simulation_ports.get_port_by_number(j).CSXport
-            CSX_port_j.CalcPort(data_path, f, simulation_ports.get_port_by_number(j).port_Z0)
-            Sij = CSX_port_i.uf_ref  / CSX_port_j.uf_inc
+            CSX_port_j = port_j.CSXport
+            CSX_port_j.CalcPort(data_path, f, port_j.port_Z0)
+            Sij = power_wave_ratio(CSX_port_i.uf_ref, CSX_port_j.uf_inc, port_i.port_Z0, port_j.port_Z0)
 
         return Sij
 
@@ -266,6 +275,10 @@ def calculate_Zij(i, j, f, sim_path, simulation_ports):
 
 def write_snp (Smatrix,f, filename, z0=50):
     # Smatrix input must np.array[s11] or np.array[[s11,s21],[s12,s22]], more ports are also supported
+    # z0: the reference impedance, one value for all ports, or one per port (as from
+    # simulation_ports.get_reference_impedance() when the ports differ). With one value the file is Touchstone 1.0;
+    # with different values per port it is Touchstone 2.0 with a [Reference] line, since Touchstone 1.0 has only one
+    # reference impedance. The S-parameters must refer to each port's own impedance (calculate_Sij does that).
 
     matrixsize = len(Smatrix)
     numfreq = len(f)
@@ -294,8 +307,26 @@ def write_snp (Smatrix,f, filename, z0=50):
 
     print('Creating  S-parameter file')
 
+    if isinstance(z0, (list, tuple)) or getattr(z0, 'ndim', 0) > 0:
+        references = [float(value) for value in z0]
+        if len(references) != matrixsize:
+            raise ValueError(f'write_snp: {len(references)} reference impedances for {matrixsize} ports')
+        mixed = any(value != references[0] for value in references)
+        z0 = references[0]
+    else:
+        mixed = False
+
     with open(filename, 'w') as snp_file:
+        if mixed:
+            snp_file.write('[Version] 2.0\n')
         snp_file.write(f'#   Hz   S  RI   R   {z0:g}\n')
+        if mixed:
+            snp_file.write(f'[Number of Ports] {matrixsize}\n')
+            if matrixsize == 2:
+                snp_file.write('[Two-Port Data Order] 21_12\n')
+            snp_file.write(f'[Number of Frequencies] {numfreq}\n')
+            snp_file.write('[Reference] ' + ' '.join(f'{value:g}' for value in references) + '\n')
+            snp_file.write('[Network Data]\n')
         snp_file.write('!\n')
 
         # address elements as Sij
@@ -321,6 +352,8 @@ def write_snp (Smatrix,f, filename, z0=50):
                 line = line + ('\n' + ' ' * len(line)).join(rows)
 
             snp_file.write(line + '\n')
+        if mixed:
+            snp_file.write('[End]\n')
 
 
 

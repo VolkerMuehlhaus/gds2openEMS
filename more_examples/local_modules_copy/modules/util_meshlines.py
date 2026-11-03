@@ -637,6 +637,32 @@ def create_xy_using_easyMesh(CSX, allpolygons, simulation_ports, margin, antenna
 
 # no need for separate z mesh function, that is all done in create_xyz_using_autoMesh
 
+def add_port_mesh_lines(mesh, allpolygons, tolerance=1e-6):
+    """
+    Makes sure that every port polygon contains a mesh line in x and in y, after the xy mesh is complete.
+    A lumped port acts only on the mesh edges inside its box: a port between two lines, or a zero-width port whose
+    plane is not a mesh line, excites nothing (its probes stay 0 and the run never reaches energy_limit).
+    remove_closely_spaced_lines() can move port edges, e.g. average the planes of two ports 0.1 um apart, so a
+    missing line is added here, at the center of the port in that direction (in the plane of a zero-width port).
+    Only ports without a line get one: elsewhere the mesh stays as it is.
+    Returns the mesh and the number of lines added.
+    """
+    added = 0
+    for poly in allpolygons.polygons:
+        if not poly.is_port:
+            continue
+        for axis, low, high in (('x', poly.xmin, poly.xmax), ('y', poly.ymin, poly.ymax)):
+            lines = mesh.GetLines(axis)
+            if not np.any((lines >= low - tolerance) & (lines <= high + tolerance)):
+                mesh.AddLine(axis, (low + high) / 2)
+                added += 1
+    if added > 0:
+        mesh.Sort('all')
+        print(f'Port meshing: added {added} mesh line(s) inside port(s) that had none')
+    return mesh, added
+
+
+
 # ------------------- internal utilities -------------------------
 
 

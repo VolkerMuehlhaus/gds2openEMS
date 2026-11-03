@@ -8,7 +8,9 @@ This is an (incomplete) list of changes and new features.
 
 **Ports with different reference impedances:** S-parameters are now ratios of power waves, `S_ij = uf_ref_i / uf_inc_j · sqrt(Z0_j / Z0_i)` (`utilities.power_wave_ratio()`). Before, the plain ratio of voltage waves gave wrong values when the ports had different `port_Z0`, e.g. S21 ≠ S12 for a plain connection between a 50 Ω and a 25 Ω port. With equal impedances nothing changes. `simulation_ports.get_reference_impedance()` returns one value as before when all ports have the same `port_Z0`, else the list of port impedances, and `utilities.write_snp()` then writes a Touchstone 2.0 file with a `[Reference]` line (Touchstone 1.0 has only one reference impedance). Before, `get_reference_impedance()` stopped the script with "All ports must use the same reference impedance". The Y and Z parameter functions still require equal impedances.
 
-Tests: `tests/test_port_meshing.py`.
+**GDSII layers read once:** in the SG13G2 stackups, GDS layer 36 makes two stackup layers (the MIM top plate and the MIM dielectric below it), and every polygon is given to both. `read_gds()` read such a layer once per stackup layer, so every MIM polygon was in the model twice, and openEMS warned "Unused primitive ... MIM_equiv" and "... TopVia1" for the second copies. Now each GDS layer number is read once. The S-parameters do not change (MIM capacitor example: identical). `read_gds()` also no longer adds `gds_boundary_layers` to the caller's layer list. `more_examples/local_modules_copy` is synced with `workflow/modules` again.
+
+Tests: `tests/test_port_meshing.py`, `tests/test_gds_reader_layers.py`.
 
 **Stackup files moved:** the XML stackup files from `workflow/` are now in [`XML_stackup/legacy/`](../XML_stackup/legacy/), with the same file names and content. The `workflow/` examples read them from there. Models that used a stackup from `workflow/` by relative path need the new folder.
 

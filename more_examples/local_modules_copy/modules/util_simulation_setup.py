@@ -82,6 +82,32 @@ class simulation_port:
   def set_CSXport (self, CSXport):
     self.CSXport = CSXport  
 
+
+class MultiElementPort:
+  """
+  A port made of several elements: several polygons on one port layer, e.g. a terminal spread over several strips.
+  Each element is an openEMS lumped port with the resistance N*Z0, so the N elements in parallel terminate the port
+  with Z0, and all elements are excited together with the port's voltage. Seen from outside it is one port:
+  port voltage = mean of the element voltages, port current = sum of the element currents, incident and reflected
+  waves with the reference impedance as in openEMS' Port.CalcPort().
+  """
+
+  def __init__ (self, elements, R):
+    self.elements = elements
+    self.R = R
+
+  def CalcPort (self, sim_path, freq, ref_impedance=None, ref_plane_shift=None, signal_type='pulse'):
+    Z_ref = self.R if ref_impedance is None else ref_impedance
+    for element in self.elements:
+      element.ReadUIData(sim_path, freq, signal_type)
+    self.Z_ref  = Z_ref
+    self.uf_tot = np.mean([element.uf_tot for element in self.elements], axis=0)
+    self.if_tot = np.sum([element.if_tot for element in self.elements], axis=0)
+    self.uf_inc = 0.5 * (self.uf_tot + self.if_tot * Z_ref)
+    self.if_inc = 0.5 * (self.if_tot + self.uf_tot / Z_ref)
+    self.uf_ref = self.uf_tot - self.uf_inc
+    self.if_ref = self.if_inc - self.if_tot
+
   def __str__ (self):
     # string representation 
     mystr = 'Port ' + str(self.portnumber) + ' voltage = ' + str(self.voltage) + ' GDS source layer = ' + str(self.source_layernum) + ' target layer = ' + str(self.target_layername) + ' direction = ' + str(self.direction)
@@ -115,12 +141,12 @@ class all_simulation_ports:
       return self.ports[portnum-1]
 
   def get_reference_impedance (self):
-      # common port reference impedance for all ports, raises if ports differ
-      Z0 = self.ports[0].port_Z0
-      for port in self.ports[1:]:
-          if port.port_Z0 != Z0:
-              raise RuntimeError("All ports must use the same reference impedance.")
-      return Z0
+      # reference impedance for utilities.write_snp(): one value if all ports use the same, else the list of the
+      # port impedances in port number order (write_snp then writes Touchstone 2.0 with a [Reference] line)
+      impedances = [port.port_Z0 for port in sorted(self.ports, key=lambda p: p.portnumber)]
+      if all(z0 == impedances[0] for z0 in impedances):
+          return impedances[0]
+      return impedances
 
   def apply_layernumber_offset (self, offset):
       newportlayers = []    
@@ -578,6 +604,29 @@ def addDielectrics_to_CSX (CSX, CSX_materials_list,  materials_list, dielectrics
     return CSX, CSX_materials_list  
 
 
+def port_element_groups(boxes):
+    """Elements of one port from the bounding boxes (xmin, xmax, ymin, ymax) of the polygons on its port layer:
+    lists of box indices, boxes that touch or overlap (also through others) are one element. In the order of the
+    first box of each element."""
+    parent = list(range(len(boxes)))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, (ax0, ax1, ay0, ay1) in enumerate(boxes):
+        for j in range(i + 1, len(boxes)):
+            bx0, bx1, by0, by1 = boxes[j]
+            if ax0 <= bx1 and bx0 <= ax1 and ay0 <= by1 and by0 <= ay1:
+                parent[root(j)] = root(i)
+    groups = {}
+    for i in range(len(boxes)):
+        groups.setdefault(root(i), []).append(i)
+    return sorted(groups.values(), key=lambda members: members[0])
+
+
 def addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_list, dielectrics_list, metals_list, allpolygons):
 # Add polygons   
 
@@ -586,6 +635,26 @@ def addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_li
 
     # data structure that we write to Palace output directory with information about port Z0 and port dimensions
     all_port_information = []
+
+    # several polygons on one port layer are the elements of one port (MultiElementPort); polygons that touch are
+    # one element, with their common bounding box (two lumped ports on a shared edge would both act on it)
+    port_polys = {}
+    for poly in allpolygons.polygons:
+        if metals_list.getbylayernumber(poly.layernum) is None and simulation_ports.get_port_by_layernumber(poly.layernum) is not None:
+            port_polys.setdefault(poly.layernum, []).append(poly)
+    element_count = {}   # port layer -> number of elements
+    element_box = {}     # id(poly) -> bounding box of its element, for the first polygon of each element
+    merged_away = set()  # id(poly) of the other polygons of an element
+    for layernum, polys in port_polys.items():
+        groups = port_element_groups([(p.xmin, p.xmax, p.ymin, p.ymax) for p in polys])
+        element_count[layernum] = len(groups)
+        for members in groups:
+            element_box[id(polys[members[0]])] = (min(polys[m].xmin for m in members), max(polys[m].xmax for m in members),
+                                                   min(polys[m].ymin for m in members), max(polys[m].ymax for m in members))
+            merged_away.update(id(polys[m]) for m in members[1:])
+        if len(groups) < len(polys):
+            print(f'Port layer {layernum}: {len(polys)} polygons, touching ones combined into {len(groups)} element(s)')
+    port_elements = {}   # port number -> [element lumped ports]
 
     # add geometries on metal and via layers
     for poly in allpolygons.polygons:
@@ -600,6 +669,8 @@ def addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_li
             if port is not None:
                 # mark polygon for special handling in meshing
                 poly.is_port = True 
+                if id(poly) in merged_away:
+                    continue     # part of an element made from touching polygons, created with the first of them
 
                 # information for port metadata file
                 port_information_data = {}
@@ -615,18 +686,20 @@ def addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_li
                     voltage = port.voltage        # only apply source voltage to ports that are excited in this simulation run
                 else:
                     voltage = 0                   # passive port in this simulation run
+                # polygon, or the bounding box of an element made from touching polygons
+                bx_min, bx_max, by_min, by_max = element_box.get(id(poly), (poly.xmin, poly.xmax, poly.ymin, poly.ymax))
                 if port.reversed_direction and port.target_layername != None:
                     # in-plane port: polarity from the start/stop order along x or y
                     # (a via port is reversed in z below, openEMS takes the sign from stop - start)
-                    xmin = poly.xmax
-                    xmax = poly.xmin
-                    ymin = poly.ymax
-                    ymax = poly.ymin
+                    xmin = bx_max
+                    xmax = bx_min
+                    ymin = by_max
+                    ymax = by_min
                 else:        
-                    xmin = poly.xmin
-                    xmax = poly.xmax
-                    ymin = poly.ymin
-                    ymax = poly.ymax
+                    xmin = bx_min
+                    xmax = bx_max
+                    ymin = by_min
+                    ymax = by_max
                 
                 # port z coordinates are different between in-plane ports and via ports
                 if port.target_layername != None:
@@ -703,9 +776,19 @@ def addPorts_to_CSX (CSX, excite_portnumbers,simulation_ports,FDTD, materials_li
 
                 # via port with '-z': from the upper to the lower metal, the opposite polarity of 'z'
                 zstart, zstop = (zmax, zmin) if (port.reversed_direction and port.target_layername == None) else (zmin, zmax)
-                CSX_port = FDTD.AddLumpedPort(portnum, port_Z0, [xmin, ymin, zstart], [xmax, ymax, zstop], port_direction, voltage, priority=150)
-                # store CSX_port in the port object, for evaluation later
-                port.set_CSXport(CSX_port)
+                n_elements = element_count.get(poly.layernum, 1)
+                if n_elements == 1:
+                    CSX_port = FDTD.AddLumpedPort(portnum, port_Z0, [xmin, ymin, zstart], [xmax, ymax, zstop], port_direction, voltage, priority=150)
+                    # store CSX_port in the port object, for evaluation later
+                    port.set_CSXport(CSX_port)
+                else:
+                    # one element of a multielement port: N*Z0, so the N elements in parallel give Z0; own probe names
+                    elements = port_elements.setdefault(portnum, [])
+                    port_information_data['element'] = len(elements) + 1
+                    element = FDTD.AddLumpedPort(portnum, port_Z0 * n_elements, [xmin, ymin, zstart], [xmax, ymax, zstop], port_direction,
+                                                 voltage, priority=150, PortNamePrefix=f'e{len(elements) + 1}_')
+                    elements.append(element)
+                    port.set_CSXport(MultiElementPort(elements, port_Z0))
                     
         # store port metadata for use by external de-embedding algorithm
         all_port_information_struct['ports'] = all_port_information
@@ -731,6 +814,8 @@ def addMesh_to_CSX (CSX, allpolygons, dielectrics_list, metals_list, refined_cel
         mesh = xy_mesh_function (CSX, dielectrics_list, metals_list, refined_cellsize, max_cellsize, air_around, no_z_mesh_list, primitives_mesh_setup, properties_mesh_setup, settings)
     else:
         mesh = xy_mesh_function (mesh, allpolygons, margin, air_around, refined_cellsize, max_cellsize)
+        # every port needs a mesh line inside it in x and y, or it excites nothing
+        mesh, _ = util_meshlines.add_port_mesh_lines(mesh, allpolygons)
 
     return mesh
 
