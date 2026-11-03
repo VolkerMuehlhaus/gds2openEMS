@@ -18,7 +18,10 @@ sys.path.insert(0, os.path.join(HERE, "..", "workflow"))
 from gds2openEMS import util_gds_reader as gds_reader  # noqa: E402
 from gds2openEMS import util_stackup_reader as stackup_reader  # noqa: E402
 
-STACKUP = os.path.join(HERE, "..", "workflow", "SG13G2_nosub.xml")
+# the legacy stackups moved from workflow/ to XML_stackup/legacy/, look in both places
+STACKUP = next(p for p in (os.path.join(HERE, "..", "XML_stackup", "legacy", "SG13G2_nosub.xml"),
+                           os.path.join(HERE, "..", "workflow", "SG13G2_nosub.xml"))
+               if os.path.isfile(p))
 
 
 @pytest.fixture
