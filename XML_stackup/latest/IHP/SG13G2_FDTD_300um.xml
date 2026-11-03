@@ -1,12 +1,12 @@
 <?xml version='1.0' encoding='UTF-8'?>
 <Stackup schemaVersion="3.1">
   <!-- ============================================================ -->
-  <!-- SG13G2 parameterized stackup for gds2openEMS, includes resistors, SiO2 and Passivation thickness correct for the "valleys" between TopMetal2 traces, no cover above TopMetal2 (TopMetal2 extends into AIR). Parameters: air_thickness and total_thickness. -->
+  <!-- SG13G2 parameterized stackup for gds2openEMS, includes resistors, full height SiO2+Passivation over TopMetal2. Parameters: air_thickness and total_thickness. -->
   <!-- ============================================================ -->
   <!-- Requires gds2openEMS 0.4.0 or newer. -->
   <Variables>
     <Variable Name="air_thickness" Value="300.0000" />
-    <Variable Name="total_thickness" Value="200.0000" />
+    <Variable Name="total_thickness" Value="300.0000" />
     <Variable Name="bulk_thickness" Value="=total_thickness-19.88" />
   </Variables>
   <Materials>
@@ -40,7 +40,7 @@
     <Dielectrics>
       <Dielectric Name="AIR" Reference="Passive" ReferenceEdge="Top" Material="AIR" Thickness="=air_thickness" />
       <Dielectric Name="Passive" Reference="SiO2" ReferenceEdge="Top" Material="Passive" Thickness="0.4000" />
-      <Dielectric Name="SiO2" Reference="EPI" ReferenceEdge="Top" Material="SiO2" Thickness="=15.7303-3" />
+      <Dielectric Name="SiO2" Reference="EPI" ReferenceEdge="Top" Material="SiO2" Thickness="15.7303" />
       <Dielectric Name="EPI" Reference="Substrate" ReferenceEdge="Top" Material="EPI" Thickness="3.7500" />
       <!-- substrate height as a variable: change total_thickness above and both the
            substrate bulk (bulk_thickness) and LBE's Zmax below follow automatically -->

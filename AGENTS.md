@@ -53,7 +53,7 @@ GitHub (prefix the paths below with
 cloning the repository. The user needs at least one XML stackup file
 for any model. The latest IHP stackups from
 [`XML_stackup/latest/IHP/`](XML_stackup/latest/IHP/) ship with the package:
-`utilities.get_stackup_path('SG13G2_FDTD_200um.xml')` returns the full path
+`utilities.get_stackup_path('SG13G2_FDTD_300um.xml')` returns the full path
 of one, and `utilities.get_stackup_path()` without an argument prints the
 folder and the available files. Legacy stackups are not included.
 
@@ -113,10 +113,10 @@ clone, it is [`workflow/modules/`](workflow/modules/).
 
 - Use the latest stackups for new models, in
   [`XML_stackup/latest/IHP/`](XML_stackup/latest/IHP/) (see its README):
-  - `SG13G2_FDTD_200um.xml`: SG13G2, planar passivation.
-  - `SG13G2_FDTD_200um_passicut.xml`: SG13G2, passivation cut at the
+  - `SG13G2_FDTD_300um.xml`: SG13G2, planar passivation.
+  - `SG13G2_FDTD_300um_passicut.xml`: SG13G2, passivation cut at the
     TopMetal2 "valleys" (closer to measurement in the L6n2 inductor study).
-  - `SG13CMOS5L_FDTD_200um.xml`: SG13CMOS5L.
+  - `SG13CMOS5L_FDTD_300um.xml`: SG13CMOS5L.
 
   Chip height and air height are `<Variables>` (`total_thickness`,
   `air_thickness`), so one file covers all substrate heights; for structures
@@ -179,7 +179,7 @@ from openEMS import openEMS
 from gds2openEMS import *    # stackup_reader, gds_reader, simulation_setup, utilities
 
 gds_filename = "my_layout.gds"    # ASK
-XML_filename = utilities.get_stackup_path("SG13G2_FDTD_200um.xml")   # ships with gds2openEMS; or a path to the user's own copy
+XML_filename = utilities.get_stackup_path("SG13G2_FDTD_300um.xml")   # ships with gds2openEMS; or a path to the user's own copy
 
 settings = {}
 settings['preview_only'] = False  # True: show the AppCSXCAD preview and stop

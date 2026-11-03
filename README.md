@@ -58,7 +58,7 @@ The default used in all models in this repository is to use **automatic meshing 
 # Minimum configuration
 The screenshot below shows a minimum configuration for the traditional local-copy path: the XML technology stackup, the GDSII layout, one simulation model file (here named run_inductor_diffport.py) and the utility modules with all the “behind the scenes” code that you don’t need to modify.  
 
-When using the new, recommended installation method with `pip install gds2openEMS` instead, the `modules` folder is NOT required, you just need the XML stackup, the GDSII layout, and your model script. The latest IHP stackup files from [XML_stackup/latest/IHP](XML_stackup/latest/IHP) are installed with the package: `utilities.get_stackup_path('SG13G2_FDTD_200um.xml')` returns the full path of one, and `utilities.get_stackup_path()` prints the folder and the available files.
+When using the new, recommended installation method with `pip install gds2openEMS` instead, the `modules` folder is NOT required, you just need the XML stackup, the GDSII layout, and your model script. The latest IHP stackup files from [XML_stackup/latest/IHP](XML_stackup/latest/IHP) are installed with the package: `utilities.get_stackup_path('SG13G2_FDTD_300um.xml')` returns the full path of one, and `utilities.get_stackup_path()` prints the folder and the available files.
 
 ![Minimum files](./doc/png/minimum_files.png)
 
