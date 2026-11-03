@@ -2,13 +2,17 @@
 
 This is an (incomplete) list of changes and new features.
 
-## 31-Oct-2026 (next version)
+## 03-Nov-2026 (0.7.0)
 
 **Bugfix: ports that excite nothing.** A lumped port acts only on the mesh edges inside its box. A via port drawn as a zero-width line needs a mesh line exactly in its plane, and the xy mesh could lose it: lines closer than 0.8 × `refined_cellsize` are merged, and two port edges of equal weight were replaced by one line in the middle, e.g. the planes of two ports 0.1 µm apart. Such a port injected no energy, its probes stayed 0, and openEMS never reached `energy_limit`. Found with a 15-port export from the KLayout plug-in klayout_em_export, where 3 ports were dead at `refined_cellsize` 0.5. After the xy mesh, every port without a mesh line in x or y now gets one, at its center or in the plane of a zero-width port ("Port meshing: added N mesh line(s)"). Other ports and the rest of the mesh are unchanged.
 
 **Ports with different reference impedances:** S-parameters are now ratios of power waves, `S_ij = uf_ref_i / uf_inc_j · sqrt(Z0_j / Z0_i)` (`utilities.power_wave_ratio()`). Before, the plain ratio of voltage waves gave wrong values when the ports had different `port_Z0`, e.g. S21 ≠ S12 for a plain connection between a 50 Ω and a 25 Ω port. With equal impedances nothing changes. `simulation_ports.get_reference_impedance()` returns one value as before when all ports have the same `port_Z0`, else the list of port impedances, and `utilities.write_snp()` then writes a Touchstone 2.0 file with a `[Reference]` line (Touchstone 1.0 has only one reference impedance). Before, `get_reference_impedance()` stopped the script with "All ports must use the same reference impedance". The Y and Z parameter functions still require equal impedances.
 
 Tests: `tests/test_port_meshing.py`.
+
+**Stackup files moved:** the XML stackup files from `workflow/` are now in [`XML_stackup/legacy/`](../XML_stackup/legacy/), with the same file names and content. The `workflow/` examples read them from there. Models that used a stackup from `workflow/` by relative path need the new folder.
+
+**New stackup files:** [`XML_stackup/latest/IHP/`](../XML_stackup/latest/IHP/) has the latest openEMS stackups `SG13G2_FDTD_300um.xml`, `SG13G2_FDTD_300um_passicut.xml` and `SG13CMOS5L_FDTD_300um.xml`. Chip height and air height are `<Variables>` (`total_thickness`, `air_thickness`), so one file replaces the legacy files for different substrate heights. SUBGND is a PEC sheet on layer 250 (legacy: a LOWLOSS volume on layer 210), BACKSIDEGND a PEC sheet on layer 251, and the RSIL/RPPD/RHIGH resistors and the REF_FOR_TRANSISTOR sheet are included. The metal, via and MIM positions are the same as in the legacy files; the default total height is 300 µm, the same as the legacy `SG13G2.xml` and `SG13CMOS5L.xml` used by the `workflow/` examples (for SG13G2 the substrate is 0.12 µm thicker, so the total height is exactly 300 µm). See [the README](../XML_stackup/latest/IHP/README.md) for which file replaces each legacy file. The files are installed with the pip package: `utilities.get_stackup_path('SG13G2_FDTD_300um.xml')` returns the full path of one, `utilities.get_stackup_path()` without an argument prints the folder and the available files. Legacy stackups are not included in the package.
 
 ## 31-Oct-2026 (0.6.7)
 

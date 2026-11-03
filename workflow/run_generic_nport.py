@@ -46,7 +46,7 @@ settings['no_gui'] = False # if set to True, there is no mesh/model preview in A
 # ===================== input files and path settings =======================
 
 gds_filename = "line_simple_viaport.gds"   # geometries
-XML_filename = "SG13G2_nosub.xml"          # stackup
+XML_filename = "../XML_stackup/legacy/SG13G2_nosub.xml"          # stackup
 
 # preprocess GDSII for safe handling of cutouts/holes?
 settings['preprocess_gds'] = False

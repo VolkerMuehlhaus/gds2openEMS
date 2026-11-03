@@ -67,6 +67,43 @@ def get_excitation_path (sim_path, ports, create=True):
         os.makedirs(ex_path)
     return ex_path
 
+
+# ============================== stackup files  =================================
+
+def get_stackup_dir ():
+    # folder with the latest IHP stackup files that ship with gds2openEMS
+    # (SG13G2_FDTD_300um.xml, SG13G2_FDTD_300um_passicut.xml, SG13CMOS5L_FDTD_300um.xml),
+    # None if it is not found
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [os.path.join(here, 'stackups'),                                 # pip installed package
+                  os.path.join(here, '..', '..', 'XML_stackup', 'latest', 'IHP')]  # git clone or editable install
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return os.path.normpath(candidate)
+    return None
+
+
+def get_stackup_path (filename=None):
+    # full path of a stackup file that ships with gds2openEMS, e.g.
+    # XML_filename = utilities.get_stackup_path('SG13G2_FDTD_300um.xml')
+    # Without a filename, prints the stackup folder and the available files and returns the folder.
+    stackup_dir = get_stackup_dir()
+    if filename is None:
+        print(f"Stackup folder: {stackup_dir}")
+        if stackup_dir is not None:
+            for f in sorted(os.listdir(stackup_dir)):
+                if f.endswith('.xml'):
+                    print(f"  {f}")
+        return stackup_dir
+    if stackup_dir is not None:
+        path = os.path.join(stackup_dir, filename)
+        if os.path.isfile(path):
+            return path
+        available = sorted(f for f in os.listdir(stackup_dir) if f.endswith('.xml'))
+    else:
+        available = []
+    raise FileNotFoundError(f"Stackup file {filename} is not included with gds2openEMS, available files: {available}")
+
 # ========================= S-parameter calculations  =============================
 
 def power_wave_ratio (uf_ref_i, uf_inc_j, z0_i, z0_j):

@@ -48,7 +48,7 @@ settings['preview_only'] = False
 # ===================== input files and path settings =======================
 
 gds_filename = "dipole_port_sg13.gds"   # geometries
-XML_filename = "SG13G2_200um_backsideGND.xml"       # stackup
+XML_filename = "../XML_stackup/legacy/SG13G2_200um_backsideGND.xml"       # stackup
 
 # preprocess GDSII for safe handling of cutouts/holes?
 settings['preprocess_gds'] = True
