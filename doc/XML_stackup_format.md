@@ -5,7 +5,7 @@ It defines the process stackup used to build a 3D simulation model from GDSII: m
 the dielectric stack, the drawn metal/via layers and their GDSII layer numbers, optional
 derived (computed) layers, and optional thermal-conductivity tables.
 
-Reference files in this repo: [`SG13G2_200um.xml`](../workflow/SG13G2_200um.xml) (basic
+Reference files in this repo: [`SG13G2_200um.xml`](../XML_stackup/legacy/SG13G2_200um.xml) (basic
 stackup) and [`SG13G2_with_resistors_200um.xml`](../more_examples/resistors_sg13g2/SG13G2_with_resistors_200um.xml)
 (adds resistor materials and derived-layer examples using `AND`/`OR`/`NOT`).
 

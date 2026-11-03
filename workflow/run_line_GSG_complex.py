@@ -43,7 +43,7 @@ settings['preview_only'] = True
 # ===================== input files and path settings =======================
 
 gds_filename = "gsg_through_50ohm.gds"   # geometries
-XML_filename = "SG13G2.xml"               # stackup
+XML_filename = "../XML_stackup/legacy/SG13G2.xml"               # stackup
 
 # preprocess GDSII for safe handling of cutouts/holes?
 settings['preprocess_gds'] = True

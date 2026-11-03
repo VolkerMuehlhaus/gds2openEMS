@@ -10,6 +10,8 @@ This is an (incomplete) list of changes and new features.
 
 Tests: `tests/test_port_meshing.py`.
 
+**Stackup files moved:** the XML stackup files from `workflow/` are now in [`XML_stackup/legacy/`](../XML_stackup/legacy/), with the same file names and content. The `workflow/` examples read them from there. Models that used a stackup from `workflow/` by relative path need the new folder.
+
 ## 31-Oct-2026 (0.6.7)
 
 **Ports with several polygons:** several separate polygons on one port layer are now the elements of one port, in parallel, e.g. for a terminal on several transistor fingers. Each element gets N·Z0, so the port is terminated with Z0; the port voltage is the mean of the element voltages, the port current their sum. Touching polygons are one element. Before, every polygon became a port of its own with the same number: openEMS stopped with "a probe named port_ut_1 already exists", or, in older openEMS versions, ran with the port terminated by Z0/N and wrong S-parameters. Resonance estimation and `deembed_openEMS.py` (element inductances in parallel) know the elements. See "Ports with several polygons" in the user's guide.

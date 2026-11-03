@@ -107,7 +107,9 @@ clone, it is [`workflow/modules/`](workflow/modules/).
 
 ### XML stackup
 
-- Stackup files for openEMS are in [`workflow/`](workflow/):
+- Stackup files for openEMS are in
+  [`XML_stackup/legacy/`](XML_stackup/legacy/), used by the
+  [`workflow/`](workflow/) examples:
   - `SG13G2.xml`, `SG13G2_200um.xml`: SG13G2 with substrate.
   - `SG13G2_200um_backsideGND.xml`: with backside metal.
   - `SG13G2_nosub.xml`: no substrate, for structures shielded by a ground
