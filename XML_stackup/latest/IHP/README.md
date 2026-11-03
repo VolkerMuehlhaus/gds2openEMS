@@ -14,7 +14,7 @@ These files are for gds2openEMS only, do not use them with gds2palace. The gds2p
 
 "300um" is the total chip height, the same as the legacy `SG13G2.xml` and `SG13CMOS5L.xml` used by the [workflow](../../../workflow) examples. For SG13G2 this is 280.12 µm substrate below 19.88 µm of EPI + BEOL. The legacy `SG13G2.xml` used a 280 µm substrate, so its total height was 299.88 µm. For other chip heights, override `total_thickness`, see below. The metal, via and MIM positions above the substrate are the same as in the legacy files.
 
-To use a file, copy it next to your model script, or use the copy that is installed with the gds2openEMS package:
+To use a file, copy it next to your model script, or use the copy that is installed with the gds2openEMS package (0.7.0 and newer):
 
 ```python
 XML_filename = utilities.get_stackup_path('SG13G2_FDTD_300um.xml')

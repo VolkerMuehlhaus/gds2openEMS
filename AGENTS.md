@@ -52,7 +52,8 @@ GitHub (prefix the paths below with
 `https://github.com/VolkerMuehlhaus/gds2openEMS/blob/main/`), or suggest
 cloning the repository. The user needs at least one XML stackup file
 for any model. The latest IHP stackups from
-[`XML_stackup/latest/IHP/`](XML_stackup/latest/IHP/) ship with the package:
+[`XML_stackup/latest/IHP/`](XML_stackup/latest/IHP/) ship with the package
+(gds2openEMS 0.7.0 and newer):
 `utilities.get_stackup_path('SG13G2_FDTD_300um.xml')` returns the full path
 of one, and `utilities.get_stackup_path()` without an argument prints the
 folder and the available files. Legacy stackups are not included.

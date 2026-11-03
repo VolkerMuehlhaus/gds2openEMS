@@ -2,7 +2,7 @@
 
 This is an (incomplete) list of changes and new features.
 
-## 31-Oct-2026 (next version)
+## 03-Nov-2026 (0.7.0)
 
 **Bugfix: ports that excite nothing.** A lumped port acts only on the mesh edges inside its box. A via port drawn as a zero-width line needs a mesh line exactly in its plane, and the xy mesh could lose it: lines closer than 0.8 × `refined_cellsize` are merged, and two port edges of equal weight were replaced by one line in the middle, e.g. the planes of two ports 0.1 µm apart. Such a port injected no energy, its probes stayed 0, and openEMS never reached `energy_limit`. Found with a 15-port export from the KLayout plug-in klayout_em_export, where 3 ports were dead at `refined_cellsize` 0.5. After the xy mesh, every port without a mesh line in x or y now gets one, at its center or in the plane of a zero-width port ("Port meshing: added N mesh line(s)"). Other ports and the rest of the mesh are unchanged.
 
