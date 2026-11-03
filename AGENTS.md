@@ -47,11 +47,15 @@ This file is at the root of the repository
 relative to that root.
 
 **If the user only installed the package** (`pip install gds2openEMS`), the
-documentation, examples and stackup files are not on their disk. Read them on
+documentation and examples are not on their disk. Read them on
 GitHub (prefix the paths below with
 `https://github.com/VolkerMuehlhaus/gds2openEMS/blob/main/`), or suggest
-cloning the repository. The user needs at least one XML stackup file, e.g.
-from [`workflow/`](workflow/), for any model.
+cloning the repository. The user needs at least one XML stackup file
+for any model. The latest IHP stackups from
+[`XML_stackup/latest/IHP/`](XML_stackup/latest/IHP/) ship with the package:
+`utilities.get_stackup_path('SG13G2_FDTD_200um.xml')` returns the full path
+of one, and `utilities.get_stackup_path()` without an argument prints the
+folder and the available files. Legacy stackups are not included.
 
 The openEMS and CSXCAD Python bindings are **not** ordinary pip wheels on
 every platform: they are installed with openEMS itself (pre-built for Windows,
@@ -107,17 +111,22 @@ clone, it is [`workflow/modules/`](workflow/modules/).
 
 ### XML stackup
 
-- Stackup files for openEMS are in
-  [`XML_stackup/legacy/`](XML_stackup/legacy/), used by the
-  [`workflow/`](workflow/) examples:
-  - `SG13G2.xml`, `SG13G2_200um.xml`: SG13G2 with substrate.
-  - `SG13G2_200um_backsideGND.xml`: with backside metal.
-  - `SG13G2_nosub.xml`: no substrate, for structures shielded by a ground
-    metal.
-  - `SG13CMOS5L*.xml`: the same variants for SG13CMOS5L.
+- Use the latest stackups for new models, in
+  [`XML_stackup/latest/IHP/`](XML_stackup/latest/IHP/) (see its README):
+  - `SG13G2_FDTD_200um.xml`: SG13G2, planar passivation.
+  - `SG13G2_FDTD_200um_passicut.xml`: SG13G2, passivation cut at the
+    TopMetal2 "valleys" (closer to measurement in the L6n2 inductor study).
+  - `SG13CMOS5L_FDTD_200um.xml`: SG13CMOS5L.
 
-  A parameterized SG13G2 stackup with `<Variables>` is in
-  [`more_examples/parameterized_XML_stackup/`](more_examples/parameterized_XML_stackup/).
+  Chip height and air height are `<Variables>` (`total_thickness`,
+  `air_thickness`), so one file covers all substrate heights; for structures
+  shielded by a ground metal use `total_thickness = 25`. SUBGND (layer 250)
+  and BACKSIDEGND (layer 251) are PEC sheets where drawn; resistors come from
+  derived layers.
+- The older stackups are in [`XML_stackup/legacy/`](XML_stackup/legacy/),
+  used by the [`workflow/`](workflow/) examples (`SG13G2.xml`,
+  `SG13G2_200um.xml`, `_backsideGND`, `_nosub`, and the same for
+  SG13CMOS5L). There, SUBGND is on layer 210.
 - **gds2openEMS stackups and gds2palace stackups are not interchangeable**,
   even for the same technology. They model e.g. the MIM dielectric
   differently. Never use a gds2palace stackup file with gds2openEMS or the
@@ -170,7 +179,7 @@ from openEMS import openEMS
 from gds2openEMS import *    # stackup_reader, gds_reader, simulation_setup, utilities
 
 gds_filename = "my_layout.gds"    # ASK
-XML_filename = "SG13G2.xml"       # an openEMS stackup, copied next to the script
+XML_filename = utilities.get_stackup_path("SG13G2_FDTD_200um.xml")   # ships with gds2openEMS; or a path to the user's own copy
 
 settings = {}
 settings['preview_only'] = False  # True: show the AppCSXCAD preview and stop

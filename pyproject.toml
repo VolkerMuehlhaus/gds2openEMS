@@ -33,6 +33,15 @@ convert2settings = "gds2openEMS.convert2settings:main"
 [tool.setuptools.dynamic]
 version = {attr = "gds2openEMS.__version__"}
 
+# The latest IHP stackup files ship inside the wheel as gds2openEMS.stackups,
+# mapped from XML_stackup/latest/IHP so there is only one copy in the repo.
+# Find them with gds2openEMS.utilities.get_stackup_path().
 [tool.setuptools]
-package-dir = {"gds2openEMS" = "workflow/modules"}
-packages = ["gds2openEMS", "stackup_editor"]
+packages = ["gds2openEMS", "gds2openEMS.stackups", "stackup_editor"]
+
+[tool.setuptools.package-dir]
+"gds2openEMS" = "workflow/modules"
+"gds2openEMS.stackups" = "XML_stackup/latest/IHP"
+
+[tool.setuptools.package-data]
+"gds2openEMS.stackups" = ["*.xml", "README.md"]

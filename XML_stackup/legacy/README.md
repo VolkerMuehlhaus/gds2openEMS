@@ -10,3 +10,5 @@ The XML stackup files in this folder are legacy files, provided for compatibilit
 | `SG13CMOS5L*.xml` | the same variants for SG13CMOS5L |
 
 These files are for gds2openEMS only, do not use them with gds2palace.
+
+The latest stackup files can be found in the [latest/IHP](../latest/IHP) folder, with a table of which latest file replaces each legacy file. **For new models, it is recommended to use the XML stackup files from the [latest/IHP](../latest/IHP) folder.**
