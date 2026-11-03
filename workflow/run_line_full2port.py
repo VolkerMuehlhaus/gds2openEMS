@@ -46,7 +46,7 @@ settings['preview_only'] = True
 # ===================== input files and path settings =======================
 
 gds_filename = "line_simple.gds"   # geometries
-XML_filename = "SG13G2_nosub.xml"               # stackup
+XML_filename = "../XML_stackup/legacy/SG13G2_nosub.xml"               # stackup
 
 # preprocess GDSII for safe handling of cutouts/holes?
 settings['preprocess_gds'] = True

@@ -1,0 +1,88 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<Stackup schemaVersion="3.1">
+  <!-- ============================================================ -->
+  <!-- SG13CMOS5L parameterized stackup for gds2openEMS, includes resistors, full height SiO2+Passivation over TopMetal1. Parameters: air_thickness and total_thickness. -->
+  <!-- ============================================================ -->
+  <!-- Requires gds2openEMS 0.4.0 or newer. -->
+  <Variables>
+    <Variable Name="air_thickness" Value="300.0000" />
+    <Variable Name="total_thickness" Value="300.0000" />
+    <Variable Name="bulk_thickness" Value="=total_thickness-13.05" />
+  </Variables>
+  <Materials>
+    <Material Name="Activ" Type="Conductor" Conductivity="357141.0" Color="00ff00" />
+    <Material Name="Metal1" Type="Conductor" Conductivity="21640000.0" Color="39bfff" />
+    <Material Name="Metal2" Type="Conductor" Conductivity="23190000.0" Color="ccccd9" />
+    <Material Name="Metal3" Type="Conductor" Conductivity="23190000.0" Color="d80000" />
+    <Material Name="Metal4" Type="Conductor" Conductivity="23190000.0" Color="93e837" />
+    <Material Name="TopMetal1" Type="Conductor" Conductivity="27800000.0" Color="ffe6bf" />
+    <Material Name="TopVia1" Type="Conductor" Conductivity="2191000.0" Color="ffe6bf" />
+    <Material Name="Via3" Type="Conductor" Conductivity="1660000.0" Color="9ba940" />
+    <Material Name="Via2" Type="Conductor" Conductivity="1660000.0" Color="ff3736" />
+    <Material Name="Via1" Type="Conductor" Conductivity="1660000.0" Color="ccccff" />
+    <Material Name="Cont" Type="Conductor" Conductivity="2390000.0" Color="00ffff" />
+    <Material Name="Passive" Type="Dielectric" Permittivity="6.6" DielectricLossTangent="0.0" Color="a0a0f0" />
+    <Material Name="SiO2" Type="Dielectric" Permittivity="4.1" DielectricLossTangent="0.0" Color="fffcad" />
+    <Material Name="Substrate" Type="Semiconductor" Permittivity="11.9" DielectricLossTangent="0" Conductivity="2.0" Color="01e0ff" />
+    <Material Name="EPI" Type="Semiconductor" Permittivity="11.9" DielectricLossTangent="0" Conductivity="5.0" Color="294fff" />
+    <Material Name="AIR" Type="Dielectric" Permittivity="1.0" DielectricLossTangent="0.0" Color="d0d0d0" />
+    <Material Name="RSIL" Type="Resistor" Rs="7" Color="d0d0d0" />
+    <Material Name="RPPD" Type="Resistor" Rs="260" Color="d0d0d0" />
+    <Material Name="RHIGH" Type="Resistor" Rs="1360" Color="d0d0d0" />
+  </Materials>
+  <ELayers LengthUnit="um">
+    <Dielectrics>
+      <Dielectric Name="AIR" Reference="Passive" ReferenceEdge="Top" Material="AIR" Thickness="=air_thickness" />
+      <Dielectric Name="Passive" Reference="SiO2" ReferenceEdge="Top" Material="Passive" Thickness="0.4000" />
+      <Dielectric Name="SiO2" Reference="EPI" ReferenceEdge="Top" Material="SiO2" Thickness="8.9000" />
+      <Dielectric Name="EPI" Reference="Substrate" ReferenceEdge="Top" Material="EPI" Thickness="3.7500" />
+      <!-- substrate height as a variable: change total_thickness above and both the
+           substrate bulk (bulk_thickness) and LBE's Zmax below follow automatically -->
+      <Dielectric Name="Substrate" Material="Substrate" Thickness="=bulk_thickness" />
+    </Dielectrics>
+    <Layers>
+      <Layer Name="TopMetal1" Type="conductor" Reference="TopVia1" ReferenceEdge="Top" Material="TopMetal1" Layer="126" Zmin="0.0000" Zmax="2.0000" />
+      <Layer Name="TopVia1" Type="via" Reference="Metal4" ReferenceEdge="Top" Material="TopVia1" Layer="125" Zmin="0.0000" Zmax="0.8500" />
+      <Layer Name="Metal4" Type="conductor" Reference="Via3" ReferenceEdge="Top" Material="Metal4" Layer="50" Zmin="0.0000" Zmax="0.4900" />
+      <Layer Name="Via3" Type="via" Reference="Metal3" ReferenceEdge="Top" Material="Via3" Layer="49" Zmin="0.0000" Zmax="0.5400" />
+      <Layer Name="Metal3" Type="conductor" Reference="Via2" ReferenceEdge="Top" Material="Metal3" Layer="30" Zmin="0.0000" Zmax="0.4900" />
+      <Layer Name="Via2" Type="via" Reference="Metal2" ReferenceEdge="Top" Material="Via2" Layer="29" Zmin="0.0000" Zmax="0.5400" />
+      <Layer Name="Metal2" Type="conductor" Reference="Via1" ReferenceEdge="Top" Material="Metal2" Layer="10" Zmin="0.0000" Zmax="0.4900" />
+      <Layer Name="Via1" Type="via" Reference="Metal1" ReferenceEdge="Top" Material="Via1" Layer="19" Zmin="0.0000" Zmax="0.5400" />
+      <Layer Name="Metal1" Type="conductor" Reference="Cont" ReferenceEdge="Top" Material="Metal1" Layer="8" Zmin="0.0000" Zmax="0.4200" />
+      <Layer Name="Cont" Type="via" Reference="Activ" ReferenceEdge="Top" Material="Cont" Layer="6" Zmin="0.0000" Zmax="0.6400" />
+      <!-- SG13CMOS5L resistors created from derived layers defined in DerivedLayers section below -->
+      <Layer Name="RHIGH" Type="sheet" Reference="Activ" ReferenceEdge="Top" Material="RHIGH" Layer="312" Zmin="0.0000" Zmax="0.0000" />
+      <Layer Name="RPPD" Type="sheet" Reference="Activ" ReferenceEdge="Top" Material="RPPD" Layer="313" Zmin="0.0000" Zmax="0.0000" />
+      <Layer Name="RSIL" Type="sheet" Reference="Activ" ReferenceEdge="Top" Material="RSIL" Layer="314" Zmin="0.0000" Zmax="0.0000" />
+      <Layer Name="REF_FOR_TRANSISTOR" Type="sheet" Reference="SiO2" ReferenceEdge="Bottom" Material="PEC" Layer="300" Zmin="0.4" Zmax="0.4" />
+      <Layer Name="Activ" Type="conductor" Reference="SiO2" ReferenceEdge="Bottom" Material="Activ" Layer="1" Zmin="0.0000" Zmax="0.4000" />
+      <Layer Name="SUBGND" Type="sheet" Reference="EPI" ReferenceEdge="Top" Material="PEC" Layer="250" Zmin="0.0000" Zmax="0.0000" />
+      <Layer Name="LBE" Type="via" Reference="Substrate" ReferenceEdge="Bottom" Material="AIR" Layer="157" Zmin="0.0000" Zmax="=bulk_thickness + 3.7500" />
+      <Layer Name="BACKSIDEGND" Type="sheet" Reference="Substrate" ReferenceEdge="Bottom" Material="PEC" Layer="251" Zmin="0.0000" Zmax="0.0000" />
+    </Layers>
+    <DerivedLayers>
+      <DerivedLayer Name="GatPoly" Layer="310" Operation="OR">
+        <Operand Layer="5" />
+        <Operand Layer="128" />
+      </DerivedLayer>
+      <DerivedLayer Name="Rhigh_or_Rppd" Layer="311" Operation="AND">
+        <Operand Layer="28" />
+        <Operand Layer="14" />
+        <Operand Layer="310" />
+      </DerivedLayer>
+      <DerivedLayer Name="RHIGH" Layer="312" Operation="AND">
+        <Operand Layer="311" />
+        <Operand Layer="7" />
+      </DerivedLayer>
+      <DerivedLayer Name="RPPD" Layer="313" Operation="NOT">
+        <Operand Layer="311" />
+        <Operand Layer="7" />
+      </DerivedLayer>
+      <DerivedLayer Name="RSIL" Layer="314" Operation="NOT">
+        <Operand Layer="310" />
+        <Operand Layer="311" />
+      </DerivedLayer>
+    </DerivedLayers>
+  </ELayers>
+</Stackup>

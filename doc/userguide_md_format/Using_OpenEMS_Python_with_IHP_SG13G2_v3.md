@@ -170,7 +170,7 @@ This chapter gives a brief, practical walkthrough. It uses `workflow/run_inducto
 
 ### Minimum configuration
 
-If you installed `gds2openEMS` via pip, the minimum configuration for a model is just three files in one directory: the **XML stackup**, the **GDSII layout**, and your **model script**. No `modules/` folder needed.
+If you installed `gds2openEMS` via pip, the minimum configuration for a model is just three files in one directory: the **XML stackup**, the **GDSII layout**, and your **model script**. No `modules/` folder needed. The latest openEMS stackup files for SG13G2 and SG13CMOS5L are in the `XML_stackup/latest/IHP/` folder of this repository, and are also installed with the package: `XML_filename = utilities.get_stackup_path('SG13G2_FDTD_300um.xml')` returns the full path of one. See the README in that folder for the available files and which one replaces each older stackup. The older stackups are in `XML_stackup/legacy/`. The examples under `workflow/` read them from there, with a relative path.
 
 If you're using the local-copy method instead, add a fourth item: your own copy of the `modules/` folder, next to the script.
 
