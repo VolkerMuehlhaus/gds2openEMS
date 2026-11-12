@@ -50,6 +50,8 @@ This style is used in all `workflow/` examples now, and it's also what `gds2pala
 As a bonus, `max_cellsize` is computed for you from `fstop`/`unit`/`cells_per_wavelength` instead of you having to compute this explicitely in your own model code.
 - The traditional method was to create model code with **Loose top-level variables** (`fstart = 0e9`, `refined_cellsize = 1`, ...) that are passed individually and positionally. This original style is still fully supported, if you wish to use it. You can find an example for this in `more_examples/local_modules_copy/run_line_viaport.py`.
 
+To convert a model from the loose-variable style to the `settings = {}` style, use the `convert2settings` tool that is installed with gds2openEMS: `convert2settings my_model.py` writes `my_model_settings.py` next to the original, and `convert2settings --gui my_model.py` shows both side by side first. See [Converting older models to the settings syntax](./doc/userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#converting-older-models-to-the-settings-syntax) in the User's Guide.
+
 # Automatic meshing
 The default used in all models in this repository is to use **automatic meshing based on geometry**, which tries to detect edges and diagonal areas that need local refinement. Mesh lines that are too close (resulting in slow simulation) will be removed or merged automatically.
 

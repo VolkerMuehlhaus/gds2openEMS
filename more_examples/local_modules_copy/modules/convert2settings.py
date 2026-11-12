@@ -32,7 +32,7 @@ safely is refused, and the result is verified: the edited text must parse to exa
 that the intended transformation gives.
 
 Usage:
-    convert2settings model.py [more models or folders] [--engine gpu] [--dry-run] [--json]
+    convert2settings model.py [more models or folders] [--engine cpu|gpu] [--dry-run] [--json]
     convert2settings --gui [model.py ...]      window with a side-by-side preview
 
 Each model is written to <name>_settings.py next to it. The model itself is never written, and an
@@ -87,7 +87,7 @@ SIGNATURES = [
     ("read_substrate", 1, "variable_overrides", "variable_overrides"),
 ]
 
-ENGINES = ("gpu",)        # openEMS --engine values offered by --engine (the CPU is the default)
+ENGINES = ("cpu", "gpu")  # openEMS --engine values offered by --engine (without it: the openEMS default)
 
 
 class Refused(Exception):
@@ -1476,7 +1476,8 @@ def main(argv=None):
     p.add_argument("models", nargs="*", metavar="MODEL",
                    help="model script(s), or folder(s) whose *.py files are converted")
     p.add_argument("--engine", choices=ENGINES,
-                   help="set settings['engine'] in the converted model, e.g. gpu for the GPU engine")
+                   help="set settings['engine'] in the converted model: cpu for the new CPU engine "
+                        "of openEMS, gpu for the GPU engine (without it: the openEMS default)")
     p.add_argument("--dry-run", action="store_true", help="show the changes, write nothing")
     p.add_argument("--json", action="store_true", help="print the full reports as JSON")
     p.add_argument("--gui", action="store_true",

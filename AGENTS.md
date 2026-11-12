@@ -163,7 +163,7 @@ variables (the older style) are still supported. Use the dictionary for new
 scripts.
 To convert an older script, run `convert2settings model.py` (writes
 `model_settings.py`, switches a local `modules` folder to the gds2openEMS
-imports; `--engine gpu` also sets the GPU engine, `--gui` shows a side-by-side
+imports; `--engine cpu` or `--engine gpu` also sets the engine, `--gui` shows a side-by-side
 preview first). Its tests are in
 `tests/test_convert2settings.py` (`python -m pytest tests`).
 
@@ -273,7 +273,7 @@ list):
 | `fill_factor_correction` | `False` | Scale the conductivity of merged via arrays by their fill factor |
 | `air_around` | `0` | Extra air around the model in addition to `margin`, one value or 6 values |
 | `numThreads` | `0` (automatic) | Force the openEMS thread count |
-| `engine` | none (openEMS default, CPU) | openEMS engine, e.g. `'gpu'` for the GPU engine (needs openEMS built from source after v0.37.0; without the GPU engine openEMS ignores it and runs on the CPU, with a warning) |
+| `engine` | none (openEMS default: the multithreaded SSE engine) | openEMS engine, passed to openEMS as it is: `'gpu'` for the GPU engine, `'cpu'` for the new CPU engine (experimental in openEMS). Both need openEMS built from source after v0.37.0. An openEMS without the engine ignores the value and runs its default engine; gds2openEMS warns about that for `'gpu'` only, so check the openEMS output for `'cpu'` |
 | `resonance_estimation` | `False` | Stop openEMS once the extrapolated S-parameters have converged (`energy_limit` stays the upper limit); see "Resonance estimation" in the user's guide |
 | `field_dumps` | none | An `all_field_dumps()` object, see "Field dumps" in the user's guide |
 | `easyMesh` | `False` | Use the easyMesh4openEMS mesher (separate package) |

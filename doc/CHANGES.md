@@ -2,6 +2,27 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 12-Nov-2026
+
+**New CPU engine of openEMS:** `settings['engine'] = 'cpu'` selects the new CPU engine of openEMS, in addition to `'gpu'` for the GPU engine:
+
+```python
+settings['engine'] = 'cpu'   # new CPU engine
+settings['engine'] = 'gpu'   # GPU engine
+```
+
+Without `settings['engine']`, nothing changes: no engine is passed, and openEMS uses its default (the multithreaded SSE engine). The new CPU engine is experimental in openEMS and not in an openEMS release yet (v0.37.0 doesn't have it): openEMS has to be built from its current source code. openEMS without this engine ignores `'cpu'` and runs its default engine, without a warning; the openEMS output shows which engine runs. Example, on an AMD Ryzen AI Max+ PRO 395: `run_line_full2port.py` (PML boundaries) took 7.7 s per port instead of 33 s, with S-parameters equal to 1e-6. See [The new CPU engine](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#the-new-cpu-engine) in the user's guide.
+
+**`convert2settings`**, the tool that converts model scripts from the older loose-variable syntax to the `settings[]` syntax (see 26-Oct-2026 below), can set both engines:
+
+```
+convert2settings my_model.py --engine cpu       # also use the new CPU engine
+convert2settings my_model.py --engine gpu       # also run on the GPU
+convert2settings --gui my_model.py              # preview side by side in a window, then convert
+```
+
+In the `--gui` window, the "Run on the GPU" checkbox is now a choice of `settings['engine']`: not set, `'cpu'` or `'gpu'`. The tool is described in [Converting older models](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#converting-older-models-to-the-settings-syntax) in the user's guide, and now also mentioned in the README.
+
 ## 03-Nov-2026 (0.7.0)
 
 **Bugfix: ports that excite nothing.** A lumped port acts only on the mesh edges inside its box. A via port drawn as a zero-width line needs a mesh line exactly in its plane, and the xy mesh could lose it: lines closer than 0.8 × `refined_cellsize` are merged, and two port edges of equal weight were replaced by one line in the middle, e.g. the planes of two ports 0.1 µm apart. Such a port injected no energy, its probes stayed 0, and openEMS never reached `energy_limit`. Found with a 15-port export from the KLayout plug-in klayout_em_export, where 3 ports were dead at `refined_cellsize` 0.5. After the xy mesh, every port without a mesh line in x or y now gets one, at its center or in the plane of a zero-width port ("Port meshing: added N mesh line(s)"). Other ports and the rest of the mesh are unchanged.
@@ -41,7 +62,7 @@ settings['engine'] = 'gpu'
 
 Without it, nothing changes: openEMS uses its default multithreaded CPU engine. The GPU engine is not in an openEMS release yet (v0.37.0 doesn't have it): openEMS has to be built from its current source code. openEMS without the GPU engine ignores `'gpu'` and runs on the CPU; gds2openEMS warns about that. See [Running on the GPU](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#running-on-the-gpu) in the user's guide.
 
-New tool `convert2settings`: converts model scripts in the older loose-variable syntax (`fstart = 0e9`, ..., `setupSimulation(excite_ports, simulation_ports, FDTD, ...)`) to the `settings[]` syntax of the current examples, and switches the imports of a local `modules` folder to the installed gds2openEMS package.
+**New tool `convert2settings`:** converts model scripts in the older loose-variable syntax (`fstart = 0e9`, ..., `setupSimulation(excite_ports, simulation_ports, FDTD, ...)`) to the `settings[]` syntax of the current examples, and switches the imports of a local `modules` folder to the installed gds2openEMS package.
 
 It is installed together with gds2openEMS. Run it in a terminal (Windows: Command Prompt or PowerShell) in which the Python environment with gds2openEMS is active, the same one you use to run your models, for example:
 

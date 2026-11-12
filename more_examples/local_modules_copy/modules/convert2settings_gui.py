@@ -18,7 +18,7 @@ import sys
 from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import (QColor, QFont, QFontDatabase, QPainter, QPalette, QSyntaxHighlighter,
                            QTextCharFormat, QTextCursor, QTextFormat)
-from PySide6.QtWidgets import (QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog,
+from PySide6.QtWidgets import (QAbstractItemView, QApplication, QComboBox, QDialog,
                                QFileDialog, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
                                QPlainTextEdit, QPushButton, QSplitter, QTableWidget,
                                QTableWidgetItem, QTextEdit, QVBoxLayout, QWidget)
@@ -280,7 +280,7 @@ class SideBySideDiff(QWidget):
 
 
 class ConvertWindow(QDialog):
-    """Model choice, GPU option, variable table, side-by-side preview, Convert."""
+    """Model choice, engine choice, variable table, side-by-side preview, Convert."""
 
     def __init__(self, models, engine=None, package_dir=None, signatures=None):
         super().__init__()
@@ -297,9 +297,13 @@ class ConvertWindow(QDialog):
         top.addWidget(self.model_box, 1)
         open_button = QPushButton("Open model…")
         top.addWidget(open_button)
-        self.gpu = QCheckBox("Run on the GPU (settings['engine'] = 'gpu')")
-        self.gpu.setChecked(engine == "gpu")
-        top.addWidget(self.gpu)
+        top.addWidget(QLabel("settings['engine']:"))
+        self.engine_box = QComboBox()
+        self.engine_box.addItem("not set (openEMS default)", None)
+        self.engine_box.addItem("'cpu' (new CPU engine)", "cpu")
+        self.engine_box.addItem("'gpu' (GPU engine)", "gpu")
+        self.engine_box.setCurrentIndex(max(0, self.engine_box.findData(engine)))
+        top.addWidget(self.engine_box)
         layout.addLayout(top)
 
         self.intro = QLabel()
@@ -334,7 +338,7 @@ class ConvertWindow(QDialog):
 
         open_button.clicked.connect(self._open)
         self.model_box.currentIndexChanged.connect(lambda _: self.load())
-        self.gpu.toggled.connect(lambda _: self.load())
+        self.engine_box.currentIndexChanged.connect(lambda _: self.load())
         self.convert_button.clicked.connect(self._convert)
         close.clicked.connect(self.accept)
 
@@ -365,7 +369,7 @@ class ConvertWindow(QDialog):
         if not model:
             self.intro.setText("Open a model script in the older loose-variable syntax.")
             return
-        engine = "gpu" if self.gpu.isChecked() else None
+        engine = self.engine_box.currentData()
         try:
             self.result = c2s.convert(model, engine, self.package_dir, self.signatures)
         except (c2s.Refused, OSError, UnicodeDecodeError) as e:

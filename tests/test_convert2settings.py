@@ -182,7 +182,8 @@ def test_other_syspath_lines_stay(tmp_path):
     assert_same_behaviour(model, out)
 
 
-def test_engine_gpu(tmp_path):
+@pytest.mark.parametrize("engine", ["cpu", "gpu"])
+def test_engine(tmp_path, engine):
     model = make_case(tmp_path)
     p = pkg(tmp_path) / "util_simulation_setup.py"
     t = p.read_text()
@@ -196,16 +197,16 @@ def test_engine_gpu(tmp_path):
     assert "engine=None," in t and "settings.get('engine', None)" in t and "engine=engine)" in t
     p.write_text(t)
 
-    r, out = write(model, "--engine", "gpu")
+    r, out = write(model, "--engine", engine)
     assert r["ok"], r
-    assert r["engine"] == "gpu"
+    assert r["engine"] == engine
     lines = out.read_text().splitlines()
-    i = next(n for n, l in enumerate(lines) if "settings['engine'] = 'gpu'" in l)
+    i = next(n for n, l in enumerate(lines) if "settings['engine'] = '%s'" % engine in l)
     assert lines[i].startswith("    ")                      # inside the loop, before runSimulation
     assert any("runSimulation(FDTD=FDTD, settings=settings)" in l for l in lines[i:i + 6])
     rows, _ = run_converted(model, out)
     runs = [row for row in rows if row["kind"] == "run"]
-    assert runs and all(row["engine"] == "gpu" for row in runs)
+    assert runs and all(row["engine"] == engine for row in runs)
 
 
 def test_engine_needs_workflow_support(tmp_path):
@@ -364,9 +365,12 @@ def test_gui_preview_and_convert(tmp_path, monkeypatch):
     assert w.diff.change_starts and w.diff.position.text().startswith("Change 1 of")
     assert w.convert_button.isEnabled()
 
-    w.gpu.setChecked(True)                             # stand-in workflow reads no engine key
-    assert w.result is None and "can't be converted" in w.intro.text()
-    w.gpu.setChecked(False)
+    assert w.engine_box.currentData() is None
+    for engine in ("cpu", "gpu"):                      # stand-in workflow reads no engine key
+        w.engine_box.setCurrentIndex(w.engine_box.findData(engine))
+        assert w.result is None and "can't be converted" in w.intro.text()
+    w.engine_box.setCurrentIndex(0)
+    assert w.result is not None
 
     w._convert()
     out = tmp_path / "model_settings.py"

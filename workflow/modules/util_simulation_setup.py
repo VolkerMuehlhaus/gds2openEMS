@@ -1121,8 +1121,9 @@ def runSimulation (excite_portnumbers=None,
     if numThreads is None:
         numThreads = 0
 
-    # engine is optional, e.g. 'gpu' for the GPU engine of openEMS. If not set, the
-    # engine option is not passed and openEMS uses its default (multithreaded CPU engine)
+    # engine is optional: 'gpu' for the GPU engine of openEMS, 'cpu' for its new CPU engine.
+    # The value is passed to openEMS as it is. If not set, the engine option is not passed
+    # and openEMS uses its default (the multithreaded SSE engine)
     run_options = {'numThreads': numThreads}
     if engine:
         run_options['engine'] = engine
