@@ -131,6 +131,12 @@ For all models listed above, polygons for layout and port shape are read from GD
 
 ![plot](./doc/png/run_line_noGDSII.png)
 
+# How to cite
+
+If you use gds2openEMS in a publication, please cite it. The **Cite this repository** button on the GitHub repository page gives APA and BibTeX entries, generated from [CITATION.cff](./CITATION.cff).
+
+Please also cite openEMS, as its authors [ask](https://github.com/thliebig/openEMS-Project/blob/master/doc-src/publications.rst). Both openEMS references are listed in CITATION.cff.
+
 # License
 
 This project is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later) - see [LICENSE](./LICENSE) for the full text.
