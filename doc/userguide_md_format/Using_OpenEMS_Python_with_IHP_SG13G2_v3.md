@@ -479,7 +479,14 @@ Changing the engine is a change to the model script, so the simulation runs agai
 
 #### Choosing the GPU
 
-On a machine with more than one GPU, openEMS takes the best one. `settings['gpu_device']` selects another one by its number in the openEMS device list, starting at 0. With a number that doesn't exist, openEMS stops, and its error message lists the devices, e.g. `--gpu-device=5, but there is 1 GPU device: 0: NVIDIA GeForce RTX 3060 Laptop GPU (hip-nvidia, 6.0 GiB)`.
+On a machine with more than one GPU, openEMS takes the best one. `settings['gpu_device']` selects another one by its number in the device list that openEMS prints at the start of every GPU run (gds2openEMS runs openEMS at verbose level 1), starting at 0:
+
+```
+GPU devices:
+  0: NVIDIA GeForce RTX 3060 Laptop GPU (hip-nvidia, 6.0 GiB)
+```
+
+With a number that doesn't exist, openEMS stops with an error that lists the devices too.
 
 ```python
 settings['engine'] = 'gpu'

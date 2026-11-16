@@ -1175,8 +1175,10 @@ def runSimulation (excite_portnumbers=None,
     # engine is optional: 'gpu' for the GPU engine of openEMS, 'cpu' for its new CPU engine.
     # The value is passed to openEMS as it is. If not set, the engine option is not passed
     # and openEMS uses its default (the multithreaded SSE engine).
-    # gpu_device is optional: the GPU of the GPU engine (default: the best device)
-    run_options = {'numThreads': numThreads}
+    # gpu_device is optional: the GPU of the GPU engine (default: the best device).
+    # verbose 1: openEMS prints the model statistics (cells, memory, timestep) and, for the GPU
+    # engine, the list of GPU devices, about 30 lines per excitation
+    run_options = {'numThreads': numThreads, 'verbose': 1}
     engine_options, used_engine = _engine_options(engine, gpu_device)
     run_options.update(engine_options)
        

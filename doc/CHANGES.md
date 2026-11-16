@@ -6,6 +6,8 @@ This is an (incomplete) list of changes and new features.
 
 **GPU device:** `settings['gpu_device']` selects the GPU of the GPU engine on a machine with more than one GPU (default: openEMS takes the best one). It is passed to openEMS only if the installed openEMS has this option; older ones would stop with an unknown-option error, so gds2openEMS prints a warning instead. See [Choosing the GPU](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#choosing-the-gpu) in the user's guide.
 
+**More openEMS messages:** openEMS now runs at verbose level 1. Its output adds about 30 lines per excitation: the model statistics (cells, memory of operator and field data, PEC edges, timestep, excitation length, time to build the operator) and, for the GPU engine, the list of GPU devices.
+
 **Engine from the environment:** without `settings['engine']`, current openEMS takes the engine from the environment variable `OPENEMS_ENGINE`. gds2openEMS now writes that engine to `time_information.txt` too, and warns for `OPENEMS_ENGINE=gpu` with an openEMS without the GPU engine, as for `settings['engine']`. Older openEMS ignores the variable; gds2openEMS warns about that. See [The engine from the environment](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#the-engine-from-the-environment) in the user's guide.
 
 ## 12-Nov-2026

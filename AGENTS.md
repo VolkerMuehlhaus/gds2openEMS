@@ -348,6 +348,10 @@ are gone and no correction is possible.
 - Run time grows with the cell count and with the number of time steps. Long
   runs come from very small cells (check the smallest z cell, set by the
   thinnest layer used), high-Q resonances, and `PML_8` boundaries.
+  openEMS runs at verbose level 1: per excitation, its output has a
+  statistics block (`Dimensions`, operator and field memory, `Timestep`) and,
+  for the GPU engine, the GPU device list. Read the cell count and timestep
+  there instead of estimating them.
 
 ## 6. Results
 
