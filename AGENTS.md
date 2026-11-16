@@ -273,7 +273,8 @@ list):
 | `fill_factor_correction` | `False` | Scale the conductivity of merged via arrays by their fill factor |
 | `air_around` | `0` | Extra air around the model in addition to `margin`, one value or 6 values |
 | `numThreads` | `0` (automatic) | Force the openEMS thread count |
-| `engine` | none (openEMS default: the multithreaded SSE engine) | openEMS engine, passed to openEMS as it is: `'gpu'` for the GPU engine, `'cpu'` for the new CPU engine (experimental in openEMS). Both need openEMS built from source after v0.37.0. An openEMS without the engine ignores the value and runs its default engine; gds2openEMS warns about that for `'gpu'` only, so check the openEMS output for `'cpu'` |
+| `engine` | none (openEMS default: the multithreaded SSE engine) | openEMS engine, passed to openEMS as it is: `'gpu'` for the GPU engine, `'cpu'` for the new CPU engine (experimental in openEMS). Both need openEMS built from source after v0.37.0. An openEMS without the engine ignores the value and runs its default engine; gds2openEMS warns about that for `'gpu'` only, so check the openEMS output for `'cpu'`. Current openEMS stops with an error for an unknown engine name. Without this key, current openEMS takes the engine from the environment variable `OPENEMS_ENGINE` (not part of the model hash: unchanged models reuse their results) |
+| `gpu_device` | none (openEMS: the best GPU) | GPU number for the GPU engine, passed to openEMS as `gpu_device`; only passed if the installed openEMS has that option (else a warning, since older openEMS stop on an unknown option) |
 | `resonance_estimation` | `False` | Stop openEMS once the extrapolated S-parameters have converged (`energy_limit` stays the upper limit); see "Resonance estimation" in the user's guide |
 | `field_dumps` | none | An `all_field_dumps()` object, see "Field dumps" in the user's guide |
 | `easyMesh` | `False` | Use the easyMesh4openEMS mesher (separate package) |

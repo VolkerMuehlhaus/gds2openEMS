@@ -2,7 +2,7 @@
 
 Volker Mühlhaus, volker@muehlhaus.com
 ---
-Document version: 2026-11-12 (v3)
+Document version: 2026-11-16 (v3)
 
 ## Contents
 [What's New](#whats-new)
@@ -345,6 +345,7 @@ Settings keys are case-insensitive: `settings['numthreads']` works like `setting
 | `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` |
 | `settings['numThreads']` | automatic | Force the openEMS solver thread count — see [Forcing the solver thread count](#forcing-the-solver-thread-count) |
 | `settings['engine']` | openEMS default | openEMS engine: `'cpu'` — see [The new CPU engine](#the-new-cpu-engine), or `'gpu'` — see [Running on the GPU](#running-on-the-gpu) |
+| `settings['gpu_device']` | best device | GPU of the GPU engine, a number from the device list that openEMS prints — see [Choosing the GPU](#choosing-the-gpu) |
 | `settings['resonance_estimation']` | `False` | Stop openEMS when the extrapolated S-parameters have converged; `energy_limit` stays the upper limit — see [Resonance estimation](#resonance-estimation-stop-when-the-result-has-converged) |
 | `settings['easyMesh']` | `False` | Use the easyMesh4openEMS automatic mesh generator instead of the built-in one — see [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems) |
 | `settings['field_dumps']` | none | A `simulation_setup.all_field_dumps()` object — see [Field dumps](#field-dumps) |
@@ -467,7 +468,7 @@ openEMS has a GPU engine: Metal on macOS, HIP on AMD (ROCm) and NVIDIA (CUDA) GP
 settings['engine'] = 'gpu'   # omitted: openEMS default engine
 ```
 
-The value is passed to openEMS as the `--engine` option, so other engines (e.g. `'multithreaded'`) work too.
+The value is passed to openEMS as the `--engine` option, so other engines (e.g. `'multithreaded'`, the default engine by name) work too. openEMS built from its current source code stops with an error for an engine name it doesn't know.
 
 **Getting openEMS with the GPU engine:** the GPU engine is newer than the latest openEMS release (v0.37.0), and the release packages, including the Windows package, don't have it yet. Until the next release, build openEMS from its current source code, [openEMS-Project](https://github.com/thliebig/openEMS-Project), as described in the [openEMS installation guide](https://docs.openems.de/), with the Python bindings. On macOS, the Metal backend is built by default. The HIP backend for AMD and NVIDIA GPUs needs ROCm, or CUDA with the HIP headers, on the build machine; see the "Build" section of the [openEMS change log](https://github.com/thliebig/openEMS/blob/master/CHANGELOG.md). In a build with the GPU engine, `openEMS --help` lists `gpu` for `--engine`.
 
@@ -475,6 +476,21 @@ The value is passed to openEMS as the `--engine` option, so other engines (e.g. 
 - openEMS with the GPU engine stops with an error if it finds no usable GPU device, and gds2openEMS stops too. It doesn't fall back to the CPU.
 
 Changing the engine is a change to the model script, so the simulation runs again instead of reusing existing results.
+
+#### Choosing the GPU
+
+On a machine with more than one GPU, openEMS takes the best one. `settings['gpu_device']` selects another one by its number in the openEMS device list, starting at 0. With a number that doesn't exist, openEMS stops, and its error message lists the devices, e.g. `--gpu-device=5, but there is 1 GPU device: 0: NVIDIA GeForce RTX 3060 Laptop GPU (hip-nvidia, 6.0 GiB)`.
+
+```python
+settings['engine'] = 'gpu'
+settings['gpu_device'] = 1   # omitted: the best device
+```
+
+The option is newer than the GPU engine itself. openEMS without it (v0.37.0, and early builds with the GPU engine) would stop with an error, so gds2openEMS doesn't pass it there and prints a warning instead.
+
+#### The engine from the environment
+
+Without `settings['engine']`, openEMS built from its current source code takes the engine from the environment variable `OPENEMS_ENGINE`, if it is set. This runs models on another engine without changing them, e.g. on Windows `set OPENEMS_ENGINE=gpu` before `python model.py`. The environment variable is not part of the model script: existing results of an unchanged model are reused, use `settings['force_simulation'] = True` to run it again. gds2openEMS writes the engine used, also one from `OPENEMS_ENGINE`, to `time_information.txt` in the simulation data folder. Older openEMS (v0.37.0, and early builds with the GPU engine) ignores the variable and runs its default engine; gds2openEMS prints a warning then.
 
 With PML boundaries the GPU engine gains most, because the default CPU engine is slow for PML. On an Apple M4 (Metal), `run_line_full2port.py` (PML) ran 3.5 times faster than with the default CPU engine, `run_line_GSG_complex.py` (PEC and MUR boundaries) 1.5 times. The S-parameters differ only slightly, mostly because the run ends at a slightly different timestep. If a part of the model has no GPU implementation, openEMS prints a warning listing it; it then runs on the CPU, and the speed gain is mostly lost.
 

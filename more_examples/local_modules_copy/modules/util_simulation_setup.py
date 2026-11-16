@@ -918,12 +918,61 @@ def _openEMS_has_gpu_engine ():
     return "'gpu'" in doc
 
 
-def _check_engine (engine):
+def _openEMS_has_gpu_device_option ():
+    # openEMS with the gpu_device option documents it in Run(). Older ones, v0.37.0 included, stop
+    # with an unknown-option error if it is passed. None if it can't be told.
+    doc = getattr(openEMS.Run, '__doc__', None)
+    if not doc:
+        return None
+    return 'gpu_device' in doc
+
+
+def _openEMS_reads_engine_variable ():
+    # openEMS that takes the engine from the environment variable OPENEMS_ENGINE documents it in
+    # Run(). Older ones, v0.37.0 and the first builds with the GPU engine, ignore the variable.
+    # None if it can't be told.
+    doc = getattr(openEMS.Run, '__doc__', None)
+    if not doc:
+        return None
+    return 'OPENEMS_ENGINE' in doc
+
+
+def _check_engine (engine, source="settings['engine']"):
     if engine and str(engine).lower().startswith('gpu'):
         if _openEMS_has_gpu_engine() is False:
-            _print_once(f"[WARNING] settings['engine'] = '{engine}': the installed openEMS has no GPU engine. "
+            _print_once(f"[WARNING] {source} = '{engine}': the installed openEMS has no GPU engine. "
                         "It ignores this setting and runs on the CPU. The GPU engine needs openEMS built "
                         "from its current source code, see 'Running on the GPU' in the user's guide.")
+
+
+def _engine_options (engine, gpu_device):
+    # openEMS Run() options for the engine, and the engine for the log file (None: openEMS default).
+    # Without settings['engine'], openEMS after v0.37.0 takes the engine from the environment
+    # variable OPENEMS_ENGINE, if set.
+    options = {}
+    used_engine = None
+    if engine:
+        options['engine'] = engine
+        used_engine = engine
+        _check_engine(engine)
+    elif os.environ.get('OPENEMS_ENGINE'):
+        if _openEMS_reads_engine_variable() is False:
+            _print_once(f"[WARNING] OPENEMS_ENGINE = '{os.environ['OPENEMS_ENGINE']}': the installed openEMS "
+                        "doesn't read this environment variable and runs its default engine. Use "
+                        "settings['engine'] instead.")
+        else:
+            used_engine = os.environ['OPENEMS_ENGINE'] + ' (from OPENEMS_ENGINE)'
+            _check_engine(os.environ['OPENEMS_ENGINE'], 'OPENEMS_ENGINE')
+    if gpu_device is not None:
+        if _openEMS_has_gpu_device_option() is False:
+            _print_once(f"[WARNING] settings['gpu_device'] = {gpu_device}: the installed openEMS has no "
+                        "gpu_device option, the setting is ignored. It needs openEMS built from its "
+                        "current source code, see 'Running on the GPU' in the user's guide.")
+        else:
+            options['gpu_device'] = int(gpu_device)
+            if used_engine:
+                used_engine += f', gpu_device={int(gpu_device)}'
+    return options, used_engine
 
 
 def _case_insensitive (settings):
@@ -1080,6 +1129,7 @@ def runSimulation (excite_portnumbers=None,
                    numThreads=None,
                    resonance_estimation=False,
                    engine=None,
+                   gpu_device=None,
                    settings=None):
     # This function runs the actual simulation in openEMS
 
@@ -1103,6 +1153,7 @@ def runSimulation (excite_portnumbers=None,
             numThreads         = settings.get('numThreads', 0)
             resonance_estimation = settings.get('resonance_estimation', False)
             engine             = settings.get('engine', None)
+            gpu_device         = settings.get('gpu_device', None)
         else:
             print('If positional parameters are not defined in setupSimulation, you must provide valid "settings" dictionary instead')                
             exit(1)
@@ -1123,11 +1174,11 @@ def runSimulation (excite_portnumbers=None,
 
     # engine is optional: 'gpu' for the GPU engine of openEMS, 'cpu' for its new CPU engine.
     # The value is passed to openEMS as it is. If not set, the engine option is not passed
-    # and openEMS uses its default (the multithreaded SSE engine)
+    # and openEMS uses its default (the multithreaded SSE engine).
+    # gpu_device is optional: the GPU of the GPU engine (default: the best device)
     run_options = {'numThreads': numThreads}
-    if engine:
-        run_options['engine'] = engine
-        _check_engine(engine)
+    engine_options, used_engine = _engine_options(engine, gpu_device)
+    run_options.update(engine_options)
        
 
     # Write JSON with port information to simulation data directory, used for external de-embedding
@@ -1239,8 +1290,8 @@ def runSimulation (excite_portnumbers=None,
                     logfile.write('Simulation using automatic thread count set by solver\n')
                 else:
                     logfile.write(f'Simulation enforcing numThreads={numThreads} in model file\n')
-                if engine:
-                    logfile.write(f'Simulation using openEMS engine={engine}\n')
+                if used_engine:
+                    logfile.write(f'Simulation using openEMS engine={used_engine}\n')
                 computer_name = socket.gethostname()
                 logfile.write(f'Host name: {computer_name} \n')
                 logfile.write(f'openEMS solve time for this excitation: {run_time_seconds} seconds\n')
@@ -1319,7 +1370,8 @@ def runOpenEMS (excite_ports, settings):
                                 False,
                                 numThreads = numThreads,
                                 resonance_estimation = settings.get('resonance_estimation', False),
-                                engine = settings.get('engine', None))        
+                                engine = settings.get('engine', None),
+                                gpu_device = settings.get('gpu_device', None))        
     
 
         # Initialize an empty matrix for S-parameters
