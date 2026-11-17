@@ -17,6 +17,7 @@ keywords:
   - IHP SG13G2
 version: 0.7.1
 date-released: 2026-11-17
+doi: 10.5281/zenodo.23918129
 references:
   # Both entries as requested in "Citing openEMS",
   # https://github.com/thliebig/openEMS-Project/blob/master/doc-src/publications.rst

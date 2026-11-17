@@ -135,6 +135,10 @@ For all models listed above, polygons for layout and port shape are read from GD
 
 If you use gds2openEMS in a publication, please cite it. The **Cite this repository** button on the GitHub repository page gives APA and BibTeX entries, generated from [CITATION.cff](./CITATION.cff).
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23918129.svg)](https://doi.org/10.5281/zenodo.23918129)
+
+Each release of gds2openEMS is archived on Zenodo with its own DOI. The DOI above, 10.5281/zenodo.23918129, always resolves to the latest version; the record lists the DOIs of all versions, so you can cite the version you used.
+
 Please also cite openEMS, as its authors [ask](https://github.com/thliebig/openEMS-Project/blob/master/doc-src/publications.rst). Both openEMS references are listed in CITATION.cff.
 
 # License
