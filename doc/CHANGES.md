@@ -2,6 +2,16 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 17-Nov-2026
+
+**L6n2 study redone** ([`more_examples/measured_vs_simulated/more_accurate_models_L6n2`](../more_examples/measured_vs_simulated/more_accurate_models_L6n2/README.md)). All models were run again with a larger simulation box and today's software, so that all numbers and times in the README come from one setup:
+
+- **The box:** the PEC walls were too close: 250 µm margin and no air beyond it, with the bottom wall directly under the 180 µm substrate. A sweep of the air around the model (step 0 of the README) shows L 1.8 % too low and the SRF 0.9 % too high with that box. All models now use 250 µm margin and 800 µm air on all sides.
+- **The software:** gds2openEMS 0.7.0 and openEMS built from source (1d710c2), with its new CPU engine, on the same machine as before. The earlier runs used gds2openEMS 0.5.0 (the 1 µm models with the z mesh fix of 28-Sep-2026, which removed a 0.1 µm cell in TopMetal2) and openEMS v0.0.36 with its default engine; the 1 µm model took 34 min then, 7 min now.
+- **The order of the steps:** the end criterion now comes before the mesh check, which runs at −60 dB. Before, the mesh was checked at −40 dB, where the low-frequency resistance still carries the truncation error of the end criterion. At −60 dB, peak Q changes by 6 % from 1 µm to 0.5 µm, so the final model now uses a 0.5 µm mesh (102 min).
+- **What changed in the results:** the conclusions of all steps hold. Against the measurement, the earlier final model (1 µm mesh) was 3.9 % low in L, 8.9 % low in peak Q and within 0.1 % in SRF; the new final model (0.5 µm mesh, box far enough) is 2.1 % low in L, 2.4 % low in peak Q and 0.5 % high in SRF.
+- **The comparison with Palace** now uses the gds2palace v5 model, whose boundary is far enough away too. The earlier comparison used the v2 model (100 µm margin) and agreed within 1.9 % in peak Q. With both boundaries far enough and the 0.5 µm mesh in openEMS, the two solvers agree within 1.4 % in peak Q and 0.5 % in SRF; L is 2.3 % lower in openEMS, not explained yet.
+
 ## 16-Nov-2026
 
 **GPU device:** `settings['gpu_device']` selects the GPU of the GPU engine on a machine with more than one GPU (default: openEMS takes the best one). It is passed to openEMS only if the installed openEMS has this option; older ones would stop with an unknown-option error, so gds2openEMS prints a warning instead. See [Choosing the GPU](userguide_md_format/Using_OpenEMS_Python_with_IHP_SG13G2_v3.md#choosing-the-gpu) in the user's guide.

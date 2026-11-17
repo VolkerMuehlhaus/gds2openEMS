@@ -71,6 +71,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 settings['unit']   = 1e-6  # geometry is in microns
 settings['margin'] = 250    # distance in microns from GDSII geometry boundary to simulation boundary
+settings['air_around'] = 800   # air beyond the margin on all six sides: the box of the README's first step
 
 settings['fstart']  = 0e9
 settings['fstop']   = 14e9
@@ -86,7 +87,7 @@ settings['refined_cellsize'] = 0.5 # mesh cell size in conductor region
 settings['Boundaries'] = ['PEC', 'PEC', 'PEC', 'PEC', 'PEC', 'PEC']
 
 settings['cells_per_wavelength'] = 20   # how many mesh cells per wavelength, must be 10 or more
-settings['energy_limit'] = -40          # end criteria for residual energy (dB)
+settings['energy_limit'] = -60          # end criteria for residual energy (dB)
 
 # port configuration, port geometry is read from GDSII file on the specified layer
 simulation_ports = simulation_setup.all_simulation_ports()
