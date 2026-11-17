@@ -2,7 +2,7 @@
 
 Volker Mühlhaus, volker@muehlhaus.com
 ---
-Document version: 2026-10-31 (v3)
+Document version: 2026-11-17 (v3)
 
 ## Contents
 [What's New](#whats-new)
@@ -158,7 +158,7 @@ Options:
 | Option | Effect |
 |---|---|
 | `--gui` | opens a window that shows the original and the converted model side by side, with the changed lines marked and each variable's reason, before anything is written |
-| `--engine gpu` | adds `settings['engine'] = 'gpu'`, see [Running on the GPU](#running-on-the-gpu) |
+| `--engine cpu` or `--engine gpu` | adds `settings['engine'] = 'cpu'` or `'gpu'`, see [The new CPU engine](#the-new-cpu-engine) and [Running on the GPU](#running-on-the-gpu). In the `--gui` window, the engine is a choice at the top. Without the option, no engine is set and openEMS uses its default |
 | `--dry-run` | shows the changes, writes nothing |
 | `--json` | prints a detailed report in JSON |
 
@@ -297,9 +297,23 @@ To force a re-solve even when the hashes match, pass `force_simulation=True` to 
 
 The AppCSXCAD preview itself is **not** gated by this hash check. It is shown on every run, for the first port excitation, regardless of whether the model changed. Set `no_gui = True` to suppress it. This way you always get a chance to look at the current model before deciding whether to let it re-simulate. Only the FDTD solve is skipped when nothing changed. So you can freely re-run a script after only changing your own post-processing or plotting code, without waiting through a re-solve, while still seeing the preview every time.
 
+### Running a model from the command line
+
+The model file of each excitation, `output/<model_basename>_data/sub-<n>/<model_basename>.xml`, is the complete openEMS model: geometry, mesh, ports and field dumps, plus the excitation pulse, the end criterion and the boundaries. The openEMS program runs it without Python, e.g. on another computer or for a speed test. `runSimulation()` prints the command for each excitation:
+
+```
+openEMS command line: cd "<sim_path>/sub-1" && openEMS <model_basename>.xml --engine=cpu --verbose=1
+```
+
+The engine, the GPU device, the number of threads and the verbosity are options of the openEMS program and not part of the model file: the printed command has the same options as the run from the script, e.g. `--engine` only if the script sets `settings['engine']`. Without it, current openEMS takes the engine from the environment variable `OPENEMS_ENGINE`, from the command line as well. Resonance estimation runs in Python and is not available this way; openEMS stops at `energy_limit`.
+
+openEMS writes the port data into the folder where it runs, as with a run from the script. To get the S-parameters from such a run, run the model script with `settings['postprocess_only'] = True` (and `settings['no_gui'] = False`, which otherwise switches it off): it skips the simulation and only evaluates the data.
+
+This needs openEMS v0.37.0 or newer. With an older openEMS, the model file holds only the geometry, mesh and ports: AppCSXCAD shows it, but the openEMS program can't run it.
+
 ### Output files and Touchstone conversion
 
-Output goes to `output/<model_basename>_data/sub-<n>/` for each port excitation `n`. This folder contains the CSX/mesh XML and the time-domain port voltage/current data. Field dumps are written there too, if you requested them.
+Output goes to `output/<model_basename>_data/sub-<n>/` for each port excitation `n`. This folder contains the model file `<model_basename>.xml` and the time-domain port voltage/current data. Field dumps are written there too, if you requested them.
 
 There is no separate conversion tool for openEMS. Every example model script computes the S-parameters itself after the FDTD solve finishes, and calls `utilities.write_snp()` to write them straight to a Touchstone `.sNp` file:
 
@@ -344,7 +358,8 @@ Settings keys are case-insensitive: `settings['numthreads']` works like `setting
 | `settings['fill_factor_correction']` | `False` | Scale the conductivity of merged via arrays by their via fill factor — see [Input files](#input-files) |
 | `settings['air_around']` | `0` | Extra air spacing around the model in addition to `margin`, single value or a 6-element list `[xmin, xmax, ymin, ymax, zmin, zmax]` |
 | `settings['numThreads']` | automatic | Force the openEMS solver thread count — see [Forcing the solver thread count](#forcing-the-solver-thread-count) |
-| `settings['engine']` | openEMS default | openEMS engine, e.g. `'gpu'` — see [Running on the GPU](#running-on-the-gpu) |
+| `settings['engine']` | openEMS default | openEMS engine: `'cpu'` — see [The new CPU engine](#the-new-cpu-engine), or `'gpu'` — see [Running on the GPU](#running-on-the-gpu) |
+| `settings['gpu_device']` | best device | GPU of the GPU engine, a number from the device list that openEMS prints — see [Choosing the GPU](#choosing-the-gpu) |
 | `settings['resonance_estimation']` | `False` | Stop openEMS when the extrapolated S-parameters have converged; `energy_limit` stays the upper limit — see [Resonance estimation](#resonance-estimation-stop-when-the-result-has-converged) |
 | `settings['easyMesh']` | `False` | Use the easyMesh4openEMS automatic mesh generator instead of the built-in one — see [Automatic meshing with easyMesh4openEMS](#automatic-meshing-with-easymesh4openems) |
 | `settings['field_dumps']` | none | A `simulation_setup.all_field_dumps()` object — see [Field dumps](#field-dumps) |
@@ -442,15 +457,32 @@ settings['numThreads'] = 8   # 0 (or omitted) = automatic detection
 
 See `more_examples/numThreads/` for complete examples in both the `settings{}` and loose-variable styles.
 
+### The new CPU engine
+
+openEMS is getting a new CPU engine. It makes better use of current processors than the default engine (the multithreaded SSE engine), most of all with PML boundaries. `settings['engine']` selects it:
+
+```python
+settings['engine'] = 'cpu'   # omitted: openEMS default engine
+```
+
+Without `settings['engine']`, nothing changes: gds2openEMS passes no engine to openEMS, and openEMS uses its default.
+
+**Getting openEMS with the CPU engine:** like the GPU engine, it is newer than the latest openEMS release (v0.37.0). It is in the openEMS source code since November 2026, so openEMS must be built from its current source code, see [Running on the GPU](#running-on-the-gpu) below. In a build with this engine, `openEMS --help` lists `cpu` for `--engine`.
+
+- openEMS calls this engine experimental. Compare a model with and without it before you rely on it.
+- openEMS without the CPU engine (v0.37.0 and older) ignores the setting without an error and runs its default engine. gds2openEMS does not warn about this. The openEMS output shows which engine runs: `Create FDTD engine (CPU, cell runs + multi-threading, experimental)` for the new CPU engine, `Create FDTD engine (compressed SSE + multi-threading)` for the default.
+
+As an example, on an AMD Ryzen AI Max+ PRO 395 (16 cores, Linux), `run_line_full2port.py` (PML boundaries, 0.36 million cells) took 7.7 s per port instead of 33 s with the default engine, and `run_line_GSG_complex.py` (PEC and MUR boundaries, 2.2 million cells) 12 s instead of 46 s. The runs ended at the same timestep, and the S-parameters differed by less than 1e-6 (magnitude of the difference). Other models and machines give other numbers.
+
 ### Running on the GPU
 
 openEMS has a GPU engine: Metal on macOS, HIP on AMD (ROCm) and NVIDIA (CUDA) GPUs. `settings['engine']` selects it:
 
 ```python
-settings['engine'] = 'gpu'   # omitted: openEMS default (multithreaded CPU engine)
+settings['engine'] = 'gpu'   # omitted: openEMS default engine
 ```
 
-The value is passed to openEMS as the `--engine` option, so other engines (e.g. `'multithreaded'`) work too.
+The value is passed to openEMS as the `--engine` option, so other engines (e.g. `'multithreaded'`, the default engine by name) work too. openEMS built from its current source code stops with an error for an engine name it doesn't know.
 
 **Getting openEMS with the GPU engine:** the GPU engine is newer than the latest openEMS release (v0.37.0), and the release packages, including the Windows package, don't have it yet. Until the next release, build openEMS from its current source code, [openEMS-Project](https://github.com/thliebig/openEMS-Project), as described in the [openEMS installation guide](https://docs.openems.de/), with the Python bindings. On macOS, the Metal backend is built by default. The HIP backend for AMD and NVIDIA GPUs needs ROCm, or CUDA with the HIP headers, on the build machine; see the "Build" section of the [openEMS change log](https://github.com/thliebig/openEMS/blob/master/CHANGELOG.md). In a build with the GPU engine, `openEMS --help` lists `gpu` for `--engine`.
 
@@ -459,7 +491,29 @@ The value is passed to openEMS as the `--engine` option, so other engines (e.g. 
 
 Changing the engine is a change to the model script, so the simulation runs again instead of reusing existing results.
 
-With PML boundaries the GPU engine gains most, because the CPU engine is slow for PML. On an Apple M4 (Metal), `run_line_full2port.py` (PML) ran 3.5 times faster than on the CPU, `run_line_GSG_complex.py` (PEC and MUR boundaries) 1.5 times. The S-parameters differ only slightly, mostly because the run ends at a slightly different timestep. If a part of the model has no GPU implementation, openEMS prints a warning listing it; it then runs on the CPU, and the speed gain is mostly lost.
+#### Choosing the GPU
+
+On a machine with more than one GPU, openEMS takes the best one. `settings['gpu_device']` selects another one by its number in the device list that openEMS prints at the start of every GPU run (gds2openEMS runs openEMS at verbose level 1), starting at 0:
+
+```
+GPU devices:
+  0: NVIDIA GeForce RTX 3060 Laptop GPU (hip-nvidia, 6.0 GiB)
+```
+
+With a number that doesn't exist, openEMS stops with an error that lists the devices too.
+
+```python
+settings['engine'] = 'gpu'
+settings['gpu_device'] = 1   # omitted: the best device
+```
+
+The option is newer than the GPU engine itself. openEMS without it (v0.37.0, and early builds with the GPU engine) would stop with an error, so gds2openEMS doesn't pass it there and prints a warning instead.
+
+#### The engine from the environment
+
+Without `settings['engine']`, openEMS built from its current source code takes the engine from the environment variable `OPENEMS_ENGINE`, if it is set. This runs models on another engine without changing them, e.g. on Windows `set OPENEMS_ENGINE=gpu` before `python model.py`. The environment variable is not part of the model script: existing results of an unchanged model are reused, use `settings['force_simulation'] = True` to run it again. gds2openEMS writes the engine used, also one from `OPENEMS_ENGINE`, to `time_information.txt` in the simulation data folder. Older openEMS (v0.37.0, and early builds with the GPU engine) ignores the variable and runs its default engine; gds2openEMS prints a warning then.
+
+With PML boundaries the GPU engine gains most, because the default CPU engine is slow for PML. On an Apple M4 (Metal), `run_line_full2port.py` (PML) ran 3.5 times faster than with the default CPU engine, `run_line_GSG_complex.py` (PEC and MUR boundaries) 1.5 times. The S-parameters differ only slightly, mostly because the run ends at a slightly different timestep. If a part of the model has no GPU implementation, openEMS prints a warning listing it; it then runs on the CPU, and the speed gain is mostly lost.
 
 ### Resonance estimation: stop when the result has converged
 

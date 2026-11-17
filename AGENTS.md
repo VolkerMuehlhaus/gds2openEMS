@@ -163,7 +163,7 @@ variables (the older style) are still supported. Use the dictionary for new
 scripts.
 To convert an older script, run `convert2settings model.py` (writes
 `model_settings.py`, switches a local `modules` folder to the gds2openEMS
-imports; `--engine gpu` also sets the GPU engine, `--gui` shows a side-by-side
+imports; `--engine cpu` or `--engine gpu` also sets the engine, `--gui` shows a side-by-side
 preview first). Its tests are in
 `tests/test_convert2settings.py` (`python -m pytest tests`).
 
@@ -273,7 +273,8 @@ list):
 | `fill_factor_correction` | `False` | Scale the conductivity of merged via arrays by their fill factor |
 | `air_around` | `0` | Extra air around the model in addition to `margin`, one value or 6 values |
 | `numThreads` | `0` (automatic) | Force the openEMS thread count |
-| `engine` | none (openEMS default, CPU) | openEMS engine, e.g. `'gpu'` for the GPU engine (needs openEMS built from source after v0.37.0; without the GPU engine openEMS ignores it and runs on the CPU, with a warning) |
+| `engine` | none (openEMS default: the multithreaded SSE engine) | openEMS engine, passed to openEMS as it is: `'gpu'` for the GPU engine, `'cpu'` for the new CPU engine (experimental in openEMS). Both need openEMS built from source after v0.37.0. An openEMS without the engine ignores the value and runs its default engine; gds2openEMS warns about that for `'gpu'` only, so check the openEMS output for `'cpu'`. Current openEMS stops with an error for an unknown engine name. Without this key, current openEMS takes the engine from the environment variable `OPENEMS_ENGINE` (not part of the model hash: unchanged models reuse their results) |
+| `gpu_device` | none (openEMS: the best GPU) | GPU number for the GPU engine, passed to openEMS as `gpu_device`; only passed if the installed openEMS has that option (else a warning, since older openEMS stop on an unknown option) |
 | `resonance_estimation` | `False` | Stop openEMS once the extrapolated S-parameters have converged (`energy_limit` stays the upper limit); see "Resonance estimation" in the user's guide |
 | `field_dumps` | none | An `all_field_dumps()` object, see "Field dumps" in the user's guide |
 | `easyMesh` | `False` | Use the easyMesh4openEMS mesher (separate package) |
@@ -342,11 +343,23 @@ are gone and no correction is possible.
   folder per excitation (port data, field dumps) and the `.sNp` file. If that
   path is too long on Windows (over 200 characters) or can't be created, the
   output goes to an `openEMS` folder in the system TEMP directory instead.
+- `sub-<n>/<model>.xml` is the complete openEMS model (openEMS v0.37.0 and
+  newer): `openEMS <model>.xml` runs it in that folder without Python.
+  Engine, GPU device, thread count and verbosity are openEMS options
+  (`--engine=`, `--gpu-device=`, `--numThreads=`, `--verbose=`), not in the
+  file; `runSimulation()` prints the command with the options it uses.
+  Evaluate such results with `settings['postprocess_only'] = True` (and
+  `no_gui = False`). See "Running a model from the command line" in the
+  user's guide.
 - For unattended runs, set `no_gui = True` and use `python -u`, or the output
   is buffered and a log file stays empty until the end.
 - Run time grows with the cell count and with the number of time steps. Long
   runs come from very small cells (check the smallest z cell, set by the
   thinnest layer used), high-Q resonances, and `PML_8` boundaries.
+  openEMS runs at verbose level 1: per excitation, its output has a
+  statistics block (`Dimensions`, operator and field memory, `Timestep`) and,
+  for the GPU engine, the GPU device list. Read the cell count and timestep
+  there instead of estimating them.
 
 ## 6. Results
 

@@ -71,6 +71,7 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 settings['unit']   = 1e-6  # geometry is in microns
 settings['margin'] = 250    # distance in microns from GDSII geometry boundary to simulation boundary
+settings['air_around'] = 800   # air beyond the margin on all six sides: the box of the README's first step
 
 settings['fstart']  = 0e9
 settings['fstop']   = 14e9

@@ -54,8 +54,8 @@ settings['fill_factor_correction'] = True
 
 settings['preprocess_gds'] = False # preprocessing is no longer required
 
-for cellsize in [1, 2]:
-    for energylimit in [-40,-50,-60]:
+for cellsize in [2, 1, 0.5]:
+    for energylimit in [-60]:
 
         # automated sweep, do not show AppCSXCAD model preview
         settings['no_gui'] = True # if set to True, there is no mesh/model preview in AppCSXCAD, and simulation starts immediately.
@@ -77,6 +77,7 @@ for cellsize in [1, 2]:
 
         settings['unit']   = 1e-6  # geometry is in microns
         settings['margin'] = 250    # distance in microns from GDSII geometry boundary to simulation boundary
+        settings['air_around'] = 800   # air beyond the margin on all six sides: the box of the README's first step
 
         settings['fstart']  = 0e9
         settings['fstop']   = 14e9
