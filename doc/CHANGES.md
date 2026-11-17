@@ -2,7 +2,9 @@
 
 This is an (incomplete) list of changes and new features.
 
-## 17-Nov-2026
+## 17-Nov-2026 (0.7.1)
+
+**Model file for the openEMS command line:** `sub-<n>/<model>.xml` is now the complete openEMS model, written with `FDTD.Write2XML()` (openEMS v0.37.0 and newer): besides geometry, mesh and ports, it has the excitation, the end criterion and the boundaries, so `openEMS <model>.xml` runs it without Python. Before, it held only the CSX (`CSX.Write2XML()`), which the openEMS program can't run. `runSimulation()` prints the command for each excitation, with the options the script passes to openEMS (`--engine`, `--gpu-device`, `--numThreads`, `--verbose`), since they are not part of the file. Nothing else changes: the simulation still starts from Python as before, and the hash that detects an unchanged model is still taken from the CSX alone, so existing results are not simulated again. With an older openEMS the file holds the CSX only, as before. Checked: the via port line run from the command line gives the same S-parameters as the run from the script.
 
 **L6n2 study redone** ([`more_examples/measured_vs_simulated/more_accurate_models_L6n2`](../more_examples/measured_vs_simulated/more_accurate_models_L6n2/README.md)). All models were run again with a larger simulation box and today's software, so that all numbers and times in the README come from one setup:
 

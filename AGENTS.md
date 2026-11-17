@@ -343,6 +343,14 @@ are gone and no correction is possible.
   folder per excitation (port data, field dumps) and the `.sNp` file. If that
   path is too long on Windows (over 200 characters) or can't be created, the
   output goes to an `openEMS` folder in the system TEMP directory instead.
+- `sub-<n>/<model>.xml` is the complete openEMS model (openEMS v0.37.0 and
+  newer): `openEMS <model>.xml` runs it in that folder without Python.
+  Engine, GPU device, thread count and verbosity are openEMS options
+  (`--engine=`, `--gpu-device=`, `--numThreads=`, `--verbose=`), not in the
+  file; `runSimulation()` prints the command with the options it uses.
+  Evaluate such results with `settings['postprocess_only'] = True` (and
+  `no_gui = False`). See "Running a model from the command line" in the
+  user's guide.
 - For unattended runs, set `no_gui = True` and use `python -u`, or the output
   is buffered and a log file stays empty until the end.
 - Run time grows with the cell count and with the number of time steps. Long

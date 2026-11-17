@@ -2,7 +2,7 @@
 
 Volker Mühlhaus, volker@muehlhaus.com
 ---
-Document version: 2026-11-16 (v3)
+Document version: 2026-11-17 (v3)
 
 ## Contents
 [What's New](#whats-new)
@@ -297,9 +297,23 @@ To force a re-solve even when the hashes match, pass `force_simulation=True` to 
 
 The AppCSXCAD preview itself is **not** gated by this hash check. It is shown on every run, for the first port excitation, regardless of whether the model changed. Set `no_gui = True` to suppress it. This way you always get a chance to look at the current model before deciding whether to let it re-simulate. Only the FDTD solve is skipped when nothing changed. So you can freely re-run a script after only changing your own post-processing or plotting code, without waiting through a re-solve, while still seeing the preview every time.
 
+### Running a model from the command line
+
+The model file of each excitation, `output/<model_basename>_data/sub-<n>/<model_basename>.xml`, is the complete openEMS model: geometry, mesh, ports and field dumps, plus the excitation pulse, the end criterion and the boundaries. The openEMS program runs it without Python, e.g. on another computer or for a speed test. `runSimulation()` prints the command for each excitation:
+
+```
+openEMS command line: cd "<sim_path>/sub-1" && openEMS <model_basename>.xml --engine=cpu --verbose=1
+```
+
+The engine, the GPU device, the number of threads and the verbosity are options of the openEMS program and not part of the model file: the printed command has the same options as the run from the script, e.g. `--engine` only if the script sets `settings['engine']`. Without it, current openEMS takes the engine from the environment variable `OPENEMS_ENGINE`, from the command line as well. Resonance estimation runs in Python and is not available this way; openEMS stops at `energy_limit`.
+
+openEMS writes the port data into the folder where it runs, as with a run from the script. To get the S-parameters from such a run, run the model script with `settings['postprocess_only'] = True` (and `settings['no_gui'] = False`, which otherwise switches it off): it skips the simulation and only evaluates the data.
+
+This needs openEMS v0.37.0 or newer. With an older openEMS, the model file holds only the geometry, mesh and ports: AppCSXCAD shows it, but the openEMS program can't run it.
+
 ### Output files and Touchstone conversion
 
-Output goes to `output/<model_basename>_data/sub-<n>/` for each port excitation `n`. This folder contains the CSX/mesh XML and the time-domain port voltage/current data. Field dumps are written there too, if you requested them.
+Output goes to `output/<model_basename>_data/sub-<n>/` for each port excitation `n`. This folder contains the model file `<model_basename>.xml` and the time-domain port voltage/current data. Field dumps are written there too, if you requested them.
 
 There is no separate conversion tool for openEMS. Every example model script computes the S-parameters itself after the FDTD solve finishes, and calls `utilities.write_snp()` to write them straight to a Touchstone `.sNp` file:
 

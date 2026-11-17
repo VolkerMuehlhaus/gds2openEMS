@@ -1118,7 +1118,42 @@ def setupSimulation (excite_portnumbers=None,
     return FDTD
 
 
-def runSimulation (excite_portnumbers=None, 
+def _write_model_xml (FDTD, CSX, filename, excitation_path, run_options):
+    # The complete openEMS model, FDTD setup (excitation, end criteria, boundaries) and CSX, as the
+    # openEMS binary reads it: FDTD.Write2XML, openEMS v0.37.0 and newer. Older versions only write
+    # the CSX (geometry, mesh, ports), which AppCSXCAD shows but the openEMS binary can't run.
+    # Engine, GPU device, thread count and verbosity are command line options of openEMS, never part
+    # of the file: the printed command has those of run_options, the options of FDTD.Run()
+    if hasattr(FDTD, 'Write2XML'):
+        if FDTD.Write2XML(filename):
+            command = f'openEMS {os.path.basename(filename)}'
+            for key, option in (('engine', '--engine'), ('gpu_device', '--gpu-device'),
+                                ('numThreads', '--numThreads'), ('verbose', '--verbose')):
+                if run_options.get(key):   # numThreads 0: automatic, the openEMS default
+                    command += f' {option}={run_options[key]}'
+            print(f'openEMS command line: cd "{excitation_path}" && {command}')
+            return
+        # incomplete setup (no excitation): openEMS reports the missing part
+        print(f'[WARNING] openEMS could not write the complete model to {filename}, writing the geometry only')
+    else:
+        _print_once('[INFO] This openEMS writes the geometry, mesh and ports to the model file, but not the FDTD setup: '
+                    'running the model file from the command line needs openEMS v0.37.0 or newer')
+    CSX.Write2XML(filename)
+
+
+def _hash_of_CSX (CSX, excitation_path):
+    # hash of the CSX file (geometry, mesh, ports) alone, as before the model file held the FDTD setup
+    # too: results simulated with an earlier version keep their hash. The FDTD setup comes from the
+    # model script, whose hash is part of the model hash.
+    CSX_file = os.path.join(excitation_path, 'hash_CSX.xml')
+    CSX.Write2XML(CSX_file)
+    try:
+        return calculate_sha256_of_file(CSX_file)
+    finally:
+        os.remove(CSX_file)
+
+
+def runSimulation (excite_portnumbers=None,
                    FDTD=None, 
                    sim_path=None, 
                    model_basename=None, 
@@ -1196,10 +1231,11 @@ def runSimulation (excite_portnumbers=None,
     excitation_path = utilities.get_excitation_path (sim_path, excite_portnumbers)
 
     if not postprocess_only:
-        # write CSX file
+        # write the model file: the complete openEMS model (FDTD setup + CSX), which the openEMS
+        # binary can run from the command line
         CSX_file = os.path.join(excitation_path, model_basename + '.xml')
         CSX = FDTD.GetCSX()
-        CSX.Write2XML(CSX_file)
+        _write_model_xml(FDTD, CSX, CSX_file, excitation_path, run_options)
 
         # Check if we can read a hash file from the result folder
         existing_data_hash = get_hash_from_data_folder(excitation_path)
@@ -1213,7 +1249,7 @@ def runSimulation (excite_portnumbers=None,
         # editing your own post-processing/plotting code below that call still doesn't force a
         # re-solve.
         caller_frame = inspect.stack()[1]
-        CSX_hash = calculate_sha256_of_file(CSX_file)
+        CSX_hash = _hash_of_CSX(CSX, excitation_path)
         script_hash = calculate_script_hash_up_to_line(caller_frame.filename, caller_frame.lineno)
         model_hash = calculate_combined_hash([CSX_hash, script_hash])
         model_changed = (existing_data_hash != model_hash) or force_simulation
