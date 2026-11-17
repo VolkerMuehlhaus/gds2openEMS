@@ -1,0 +1,49 @@
+cff-version: 1.2.0
+message: "If you use gds2openEMS in a publication, please cite it as below, together with openEMS."
+type: software
+title: "gds2openEMS: FDTD simulation workflow for RFIC"
+abstract: "Python workflow that creates and runs openEMS FDTD models from RFIC GDSII layout files and an XML stackup."
+authors:
+  - family-names: "Mühlhaus"
+    given-names: "Volker"
+license: GPL-3.0-or-later
+repository-code: "https://github.com/VolkerMuehlhaus/gds2openEMS"
+keywords:
+  - RFIC
+  - electromagnetic simulation
+  - FDTD
+  - GDSII
+  - openEMS
+  - IHP SG13G2
+version: 0.7.1
+date-released: 2026-11-17
+references:
+  # Both entries as requested in "Citing openEMS",
+  # https://github.com/thliebig/openEMS-Project/blob/master/doc-src/publications.rst
+  - type: software
+    title: "openEMS - Open Electromagnetic Field Solver"
+    authors:
+      - family-names: "Liebig"
+        given-names: "Thorsten"
+    institution:
+      name: "General and Theoretical Electrical Engineering (ATE), University of Duisburg-Essen"
+    url: "https://www.openEMS.de"
+  - type: article
+    title: "openEMS – a free and open source equivalent-circuit (EC) FDTD simulation platform supporting cylindrical coordinates suitable for the analysis of traveling wave MRI applications"
+    authors:
+      - family-names: "Liebig"
+        given-names: "Thorsten"
+      - family-names: "Rennings"
+        given-names: "Andreas"
+      - family-names: "Held"
+        given-names: "Sebastian"
+      - family-names: "Erni"
+        given-names: "Daniel"
+    journal: "International Journal of Numerical Modelling: Electronic Networks, Devices and Fields"
+    volume: 26
+    issue: 6
+    start: 680
+    end: 696
+    year: 2013
+    month: 11
+    doi: "10.1002/jnm.1875"
