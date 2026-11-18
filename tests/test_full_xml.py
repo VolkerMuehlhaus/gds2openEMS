@@ -7,6 +7,7 @@ next to AppCSXCAD, it also reads the file (--no-simulation).
 """
 
 import hashlib
+import locale
 import os
 import subprocess
 import sys
@@ -90,7 +91,12 @@ def test_hash_is_the_hash_of_the_csx_alone(tmp_path, monkeypatch):
     model_file, FDTD = set_up_line(tmp_path, monkeypatch)
     excitation_path = os.path.dirname(model_file)
     csx_file = os.path.join(str(tmp_path), 'csx_only.xml')
-    FDTD.GetCSX().Write2XML(csx_file)
+    previous = locale.setlocale(locale.LC_NUMERIC)       # with decimal points, as without a locale set by Qt
+    locale.setlocale(locale.LC_NUMERIC, 'C')
+    try:
+        FDTD.GetCSX().Write2XML(csx_file)
+    finally:
+        locale.setlocale(locale.LC_NUMERIC, previous)
     with open(csx_file, 'rb') as f:
         expected = hashlib.sha256(f.read()).hexdigest()
     assert simulation_setup._hash_of_CSX(FDTD.GetCSX(), excitation_path) == expected
