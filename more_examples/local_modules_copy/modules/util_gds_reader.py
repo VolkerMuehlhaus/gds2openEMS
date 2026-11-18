@@ -36,6 +36,26 @@ def _fracture (polygons, max_points=199):
   return [q.points for p in polygons for q in p.fracture(max_points=max_points)]
 
 
+def select_design_cell (library, cellname=""):
+  """The cell to read from a gdstk library: the cell called cellname, else the design cell, the top-level cell with
+  the largest bounding box that is not a $$$ cell (KLayout's $$$CONTEXT_INFO$$$), else the first top-level cell.
+  The first top-level cell, taken up to gds2openEMS 0.7, depends on the GDS reader's order and is often
+  $$$CONTEXT_INFO$$$ for KLayout files. The same rule as gds_prepare_for_EM's design_cell() and gds2palace: keep
+  them in sync. Raises ValueError for a file without cells."""
+  for cell in library.cells:
+    if cellname and cell.name == cellname:
+      return cell
+  tops = library.top_level()
+  if not tops:
+    raise ValueError('The GDSII file has no cells.')
+
+  def area (cell):
+    box = cell.bounding_box()
+    return 0 if box is None else (box[1][0] - box[0][0]) * (box[1][1] - box[0][1])
+  candidates = [c for c in tops if isinstance(c, gdstk.Cell) and not c.name.startswith('$$$')]
+  return max(candidates, key=area) if candidates else tops[0]
+
+
 def _polygons_by_spec (polygons):
   """{(layer, datatype): [point arrays]} of gdstk polygons, as gdspy's get_polygons(by_spec=True)"""
   result = {}
@@ -729,11 +749,8 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
       # obsolete, cutouts are handles safely downstream after flattening
       print('Ignoring obsolete pre-processing setting, no longer required')
 
-    # evaluate only first top level cell
-    toplevel_cell_list = input_library.top_level()
-    
-    # try to get cell named cellname, otherwise top level cell
-    cell = {c.name: c for c in input_library.cells}.get(cellname) or toplevel_cell_list[0]
+    # the cell named cellname, otherwise the design cell (largest top-level cell, not $$$CONTEXT_INFO$$$)
+    cell = select_design_cell(input_library, cellname)
     
     all_polygons = all_polygons_list()
 

@@ -60,3 +60,22 @@ def test_boundary_layers_are_read_without_changing_the_list(layout):
     assert sum(1 for p in polygons.polygons if p.layernum == 36) == 2
     assert sum(1 for p in polygons.polygons if p.layernum == 8) == 1
     assert layerlist == [36, 36]
+
+
+def test_read_gds_takes_the_design_cell(tmp_path):
+    """Without a cell name: the largest top-level cell, not $$$CONTEXT_INFO$$$ or a small device cell placed nowhere,
+    whatever their order in the file (the same rule as gds2palace and gds_prepare_for_EM)."""
+    lib = gdstk.Library()
+    lib.new_cell("$$$CONTEXT_INFO$$$").add(gdstk.rectangle((0, 0), (1000, 1000), layer=1))
+    lib.new_cell("small_device").add(gdstk.rectangle((0, 0), (2, 2), layer=8))
+    lib.new_cell("DESIGN").add(gdstk.rectangle((0, 0), (50, 40), layer=8))
+    path = str(tmp_path / "multi.gds")
+    lib.write_gds(path)
+    library = gdstk.read_gds(path)
+    assert library.top_level()[0].name != "DESIGN"
+    assert gds_reader.select_design_cell(library).name == "DESIGN"
+    assert gds_reader.select_design_cell(library, "small_device").name == "small_device"
+    _, _, metals_list = stackup_reader.read_substrate(STACKUP)
+    polygons = gds_reader.read_gds(path, [8], purposelist=[0], metals_list=metals_list)
+    assert [p.layernum for p in polygons.polygons] == [8]
+    assert polygons.get_bounding_box() == pytest.approx((0, 50, 0, 40))

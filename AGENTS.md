@@ -96,8 +96,10 @@ clone, it is [`workflow/modules/`](workflow/modules/).
 
 ### GDSII layout
 
-- `read_gds()` reads the cell named `cellname`, or the first top-level cell if
-  that name doesn't exist. Hierarchy is flattened.
+- `read_gds()` reads the cell named `cellname`, or else the design cell: the
+  top-level cell with the largest bounding box, never KLayout's
+  `$$$CONTEXT_INFO$$$` (gds2openEMS 0.8 and newer; before, the first top-level
+  cell). Hierarchy is flattened.
 - Only the layer numbers in `layerlist` and the datatypes in `purposelist` are
   read. IHP drawing data is datatype 0: use `purposelist=[0]`.
 - Units: the GDSII coordinates are used as they are, in units of
