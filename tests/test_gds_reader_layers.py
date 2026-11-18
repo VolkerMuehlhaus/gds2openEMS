@@ -1,7 +1,7 @@
 """Tests for gds_reader.read_gds(): each GDS layer number is read once.
 
 Run: python -m pytest tests/test_gds_reader_layers.py
-Needs gdspy, numpy and pytest. The SG13G2 stackups use GDS layer 36 for two stackup layers (MIM and MIM_DK): one
+Needs gdstk, numpy and pytest. The SG13G2 stackups use GDS layer 36 for two stackup layers (MIM and MIM_DK): one
 drawn MIM shape makes the top plate and the dielectric below it. read_gds() read the layer once per stackup layer,
 so every MIM polygon came out twice (and openEMS warned about unused duplicate primitives).
 """
@@ -12,7 +12,7 @@ import sys
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-gdspy = pytest.importorskip("gdspy")
+gdstk = pytest.importorskip("gdstk")
 sys.path.insert(0, os.path.join(HERE, "..", "workflow"))
 
 from gds2openEMS import util_gds_reader as gds_reader  # noqa: E402
@@ -26,11 +26,11 @@ STACKUP = next(p for p in (os.path.join(HERE, "..", "XML_stackup", "legacy", "SG
 
 @pytest.fixture
 def layout(tmp_path):
-    lib = gdspy.GdsLibrary()
-    cell = lib.new_cell("TOP_" + tmp_path.name)       # gdspy keeps cell names globally: one per test
-    cell.add(gdspy.Rectangle((0, 0), (10, 10), layer=36))      # two MIM shapes
-    cell.add(gdspy.Rectangle((20, 0), (30, 10), layer=36))
-    cell.add(gdspy.Rectangle((-5, -5), (35, 15), layer=8))     # Metal1 below
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+    cell.add(gdstk.rectangle((0, 0), (10, 10), layer=36))      # two MIM shapes
+    cell.add(gdstk.rectangle((20, 0), (30, 10), layer=36))
+    cell.add(gdstk.rectangle((-5, -5), (35, 15), layer=8))     # Metal1 below
     path = str(tmp_path / "mim.gds")
     lib.write_gds(path)
     return path
