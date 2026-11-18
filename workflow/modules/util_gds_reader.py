@@ -491,7 +491,9 @@ def resolve_derived_layers (LPPpolylist, derived_layers, layerlist, purposelist,
 
     # optionally grow (positive) or shrink (negative) the outline of the result
     if derived.oversize != 0 and len(result) > 0:
-      result = _fracture(gdstk.offset(result, derived.oversize, join='miter', tolerance=2, precision=0.001))
+      # shrinking: join first (use_union), see merge_via_array(); growing separate pieces is already right
+      result = _fracture(gdstk.offset(result, derived.oversize, join='miter', tolerance=2, precision=0.001,
+                                      use_union=derived.oversize < 0))
 
     # cache result so later derived layers can use this derived layer as an operand
     layer_polygons_gds[target_layer] = result
@@ -518,10 +520,13 @@ def merge_via_array (polygons, maxspacing):
   
   offset = maxspacing/2 + 0.01
   
-  # each result fractured at 199 vertices, as gdspy's offset and boolean did
+  # The shrink joins its input first (use_union): a merged shape with holes is a keyhole polygon (a zero-width slit
+  # from the outline to each hole), and fracturing at 199 vertices splits a large one into pieces with shared
+  # edges. Shrunk polygon by polygon, a slit widens and a shared edge opens, each cutting a strip out of the via:
+  # a ring of vias came out cut open (gds2openEMS up to 0.7). Results are fractured at 199 vertices.
   grown = _fracture(gdstk.offset([np.asarray(p) for p in polygons], offset, join='miter', tolerance=2, precision=0.001))
   merged = _fracture(gdstk.boolean(grown, [], "or"))
-  return _fracture(gdstk.offset(merged, -offset, join='miter', tolerance=2, precision=0.001))
+  return _fracture(gdstk.offset(merged, -offset, join='miter', tolerance=2, precision=0.001, use_union=True))
 
 
 def _shapely_polygons (geom):
