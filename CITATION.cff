@@ -15,8 +15,8 @@ keywords:
   - GDSII
   - openEMS
   - IHP SG13G2
-version: 0.7.1
-date-released: 2026-11-17
+version: 0.8.0
+date-released: 2026-11-18
 doi: 10.5281/zenodo.23918129
 references:
   # Both entries as requested in "Citing openEMS",
