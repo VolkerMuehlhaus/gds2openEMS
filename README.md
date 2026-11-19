@@ -29,7 +29,7 @@ please refer to https://www.openems.de/
 and https://docs.openems.de/python/install.html#python-linux-install 
 
 
-In addition to OpenEMS (which includes the CSXCAD Python bindings used directly by this workflow), the Python modules gdspy, shapely, numpy and matplotlib must be installed.
+In addition to OpenEMS (which includes the CSXCAD Python bindings used directly by this workflow), the Python modules gdstk, shapely, numpy and matplotlib must be installed (gds2openEMS 0.7 and older used gdspy).
 
 # Getting the code: pip package vs. local copy
 

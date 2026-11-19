@@ -23,6 +23,8 @@ import json
 import time
 import socket
 import inspect
+import locale
+import contextlib
 
 from . import util_utilities as utilities
 from . import util_resonance_estimation as _resonance_estimation   # name differs from the runSimulation() option
@@ -1118,6 +1120,20 @@ def setupSimulation (excite_portnumbers=None,
     return FDTD
 
 
+@contextlib.contextmanager
+def _c_number_format ():
+  # openEMS and CSXCAD write the numbers of their XML files in the C library's number format (locale).
+  # A program that has set the locale from the environment, as Qt does from LANG, then gets decimal
+  # commas (endCriteria="0,0001" with LANG=de_DE), which the openEMS binary does not read as the number,
+  # and the CSX hash changes. Written with the C number format, then the previous one is set again.
+  previous = locale.setlocale(locale.LC_NUMERIC)
+  locale.setlocale(locale.LC_NUMERIC, 'C')
+  try:
+    yield
+  finally:
+    locale.setlocale(locale.LC_NUMERIC, previous)
+
+
 def _write_model_xml (FDTD, CSX, filename, excitation_path, run_options):
     # The complete openEMS model, FDTD setup (excitation, end criteria, boundaries) and CSX, as the
     # openEMS binary reads it: FDTD.Write2XML, openEMS v0.37.0 and newer. Older versions only write
@@ -1125,7 +1141,9 @@ def _write_model_xml (FDTD, CSX, filename, excitation_path, run_options):
     # Engine, GPU device, thread count and verbosity are command line options of openEMS, never part
     # of the file: the printed command has those of run_options, the options of FDTD.Run()
     if hasattr(FDTD, 'Write2XML'):
-        if FDTD.Write2XML(filename):
+        with _c_number_format():
+            written = FDTD.Write2XML(filename)
+        if written:
             command = f'openEMS {os.path.basename(filename)}'
             for key, option in (('engine', '--engine'), ('gpu_device', '--gpu-device'),
                                 ('numThreads', '--numThreads'), ('verbose', '--verbose')):
@@ -1138,7 +1156,8 @@ def _write_model_xml (FDTD, CSX, filename, excitation_path, run_options):
     else:
         _print_once('[INFO] This openEMS writes the geometry, mesh and ports to the model file, but not the FDTD setup: '
                     'running the model file from the command line needs openEMS v0.37.0 or newer')
-    CSX.Write2XML(filename)
+    with _c_number_format():
+        CSX.Write2XML(filename)
 
 
 def _hash_of_CSX (CSX, excitation_path):
@@ -1146,7 +1165,8 @@ def _hash_of_CSX (CSX, excitation_path):
     # too: results simulated with an earlier version keep their hash. The FDTD setup comes from the
     # model script, whose hash is part of the model hash.
     CSX_file = os.path.join(excitation_path, 'hash_CSX.xml')
-    CSX.Write2XML(CSX_file)
+    with _c_number_format():
+        CSX.Write2XML(CSX_file)
     try:
         return calculate_sha256_of_file(CSX_file)
     finally:

@@ -20,7 +20,7 @@
 
 __version__ = "1.3.0"
 
-import gdspy
+import gdstk
 import numpy as np
 import os
 
@@ -28,18 +28,40 @@ from shapely import STRtree, unary_union
 from shapely.geometry import Polygon as ShapelyPolygon
 from shapely.validation import make_valid
 
-# check that we have gdspy version 1.6.x or later
-# gdspy 1.4.2 is known for issues with our geometries
 
-version_str = gdspy.__version__
-major, minor, patch = version_str.split('.')
-if int(major) == 1:
-  if int(minor) < 6:
-    print('\nERROR: Your gdspy module version ', version_str, ' is too old. Please update to 1.6.13 or later!')
-    print('Consider using venv if you are not allowed to modify the global Python modules of your system.')
-    print('https://docs.python.org/3/library/venv.html')
-    exit(1)
 
+def _fracture (polygons, max_points=199):
+  """Point arrays of gdstk polygons, each fractured into pieces of at most max_points vertices: what gdspy's
+  booleans and offsets returned with their max_points (gdspy was used before gdstk)."""
+  return [q.points for p in polygons for q in p.fracture(max_points=max_points)]
+
+
+def select_design_cell (library, cellname=""):
+  """The cell to read from a gdstk library: the cell called cellname, else the design cell, the top-level cell with
+  the largest bounding box that is not a $$$ cell (KLayout's $$$CONTEXT_INFO$$$), else the first top-level cell.
+  The first top-level cell, taken up to gds2openEMS 0.7, depends on the GDS reader's order and is often
+  $$$CONTEXT_INFO$$$ for KLayout files. The same rule as gds_prepare_for_EM's design_cell() and gds2palace: keep
+  them in sync. Raises ValueError for a file without cells."""
+  for cell in library.cells:
+    if cellname and cell.name == cellname:
+      return cell
+  tops = library.top_level()
+  if not tops:
+    raise ValueError('The GDSII file has no cells.')
+
+  def area (cell):
+    box = cell.bounding_box()
+    return 0 if box is None else (box[1][0] - box[0][0]) * (box[1][1] - box[0][1])
+  candidates = [c for c in tops if isinstance(c, gdstk.Cell) and not c.name.startswith('$$$')]
+  return max(candidates, key=area) if candidates else tops[0]
+
+
+def _polygons_by_spec (polygons):
+  """{(layer, datatype): [point arrays]} of gdstk polygons, as gdspy's get_polygons(by_spec=True)"""
+  result = {}
+  for p in polygons:
+    result.setdefault((p.layer, p.datatype), []).append(p.points)
+  return result
 
 
 # ============= technology specific stuff ===============
@@ -378,12 +400,12 @@ class all_polygons_list:
 
 
 def _store_layer_polygons (all_polygons, layerpolygons, target_layer):
-  """Convert raw gdspy polygon point arrays for one layer into gds_polygon objects,
+  """Convert raw polygon point arrays for one layer into gds_polygon objects,
   append them to all_polygons and update its per-layer bounding box.
 
   Args:
       all_polygons (all_polygons_list): running result, updated in place
-      layerpolygons (list of ndarray): raw gdspy polygon point arrays for this layer
+      layerpolygons (list of ndarray): raw polygon point arrays for this layer
       target_layer (int): layer number (offset already applied) to tag these polygons with
   """
 
@@ -427,29 +449,26 @@ def _store_layer_polygons (all_polygons, layerpolygons, target_layer):
     all_polygons.bounding_box.update(target_layer, xmin, xmax, ymin, ymax)
 
 
-def resolve_derived_layers (cell, derived_layers, layerlist, purposelist, layer_polygons_gds, layernumber_offset, all_polygons):
+def resolve_derived_layers (LPPpolylist, derived_layers, layerlist, purposelist, layer_polygons_gds, layernumber_offset, all_polygons):
   """Compute derived layers (boolean operations on other layers) and add requested ones to all_polygons.
 
   Derived layers are processed in dependency order (a derived layer that uses another derived
   layer as operand is computed after that operand). Operand layers that were not already
-  extracted as part of the requested layerlist are pulled from the GDSII cell on demand, so
+  extracted as part of the requested layerlist are pulled from the flattened cell on demand, so
   operands do not need to be requested individually. If a derived layer has a non-zero
   Oversize, the boolean result (or, with a single operand, that operand as-is) is grown
   (positive) or shrunk (negative) by that distance before being cached/stored.
 
   Args:
-      cell (gdspy.Cell): flattened top level cell being processed
+      LPPpolylist (dict): {(layer, datatype): list of ndarray} of the flattened top level cell
       derived_layers (derived_layers_list): derived layer definitions from util_stackup_reader
       layerlist (list of int): layer numbers explicitly requested for output
       purposelist (list of int): GDSII data types (purposes) to be processed
-      layer_polygons_gds (dict): {layer_num: list of ndarray} cache of raw gdspy polygons per
+      layer_polygons_gds (dict): {layer_num: list of ndarray} cache of raw polygons per
           layer, already populated for natively-extracted layers, updated in place with results
       layernumber_offset (int): offset applied to GDSII layer numbers, same as in read_gds
       all_polygons (all_polygons_list): running result, updated in place for requested derived layers
   """
-
-  # by_spec polygon lookup, used to pull operand layers that were not part of layerlist
-  LPPpolylist = cell.get_polygons(by_spec=True, depth=0)
 
   def get_layer_polygons (layernum):
     # already extracted (native layer from main loop, or previously computed derived layer)
@@ -479,8 +498,8 @@ def resolve_derived_layers (cell, derived_layers, layerlist, purposelist, layer_
     result = operand_polygons[0]
     for next_operand in operand_polygons[1:]:
       if len(result) == 0 or len(next_operand) == 0:
-        # gdspy.boolean() cannot handle an empty operand (e.g. a layer with no polygons
-        # in this cell) and raises IndexError internally - apply the boolean identity instead
+        # an empty operand (e.g. a layer with no polygons in this cell): apply the boolean
+        # identity (gdspy's boolean, used before gdstk, raised IndexError on it)
         if operation == 'and':
           result = []
         elif operation == 'not':
@@ -488,13 +507,13 @@ def resolve_derived_layers (cell, derived_layers, layerlist, purposelist, layer_
         else:  # 'or'
           result = next_operand if len(result) == 0 else result
       else:
-        boolean_result = gdspy.boolean(result, next_operand, operation, max_points=199)
-        result = boolean_result.polygons if boolean_result is not None else []
+        result = _fracture(gdstk.boolean(result, next_operand, operation))
 
     # optionally grow (positive) or shrink (negative) the outline of the result
     if derived.oversize != 0 and len(result) > 0:
-      offset_result = gdspy.offset(result, derived.oversize, join='miter', tolerance=2, precision=0.001, join_first=False, max_points=199)
-      result = offset_result.polygons
+      # shrinking: join first (use_union), see merge_via_array(); growing separate pieces is already right
+      result = _fracture(gdstk.offset(result, derived.oversize, join='miter', tolerance=2, precision=0.001,
+                                      use_union=derived.oversize < 0))
 
     # cache result so later derived layers can use this derived layer as an operand
     layer_polygons_gds[target_layer] = result
@@ -505,7 +524,7 @@ def resolve_derived_layers (cell, derived_layers, layerlist, purposelist, layer_
 
 
 def merge_via_array (polygons, maxspacing):
-  """Used internally in processing data from gdspy, does not work on our own all_polygons_list class!
+  """Used internally on raw polygon point arrays, does not work on our own all_polygons_list class!
 
   Args:
       polygons (_type_): LPPpolylist data
@@ -521,12 +540,13 @@ def merge_via_array (polygons, maxspacing):
   
   offset = maxspacing/2 + 0.01
   
-  offsetpolygonset=gdspy.offset(polygons, offset, join='miter', tolerance=2, precision=0.001, join_first=False, max_points=199)
-  mergedpolygonset=gdspy.boolean(offsetpolygonset, None,"or", max_points=199)
-  mergedpolygonset=gdspy.offset(mergedpolygonset, -offset, join='miter', tolerance=2, precision=0.001, join_first=False, max_points=199)
-  
-  # offset and boolean return PolygonSet, we only need the list of polygons from that
-  return mergedpolygonset.polygons 
+  # The shrink joins its input first (use_union): a merged shape with holes is a keyhole polygon (a zero-width slit
+  # from the outline to each hole), and fracturing at 199 vertices splits a large one into pieces with shared
+  # edges. Shrunk polygon by polygon, a slit widens and a shared edge opens, each cutting a strip out of the via:
+  # a ring of vias came out cut open (gds2openEMS up to 0.7). Results are fractured at 199 vertices.
+  grown = _fracture(gdstk.offset([np.asarray(p) for p in polygons], offset, join='miter', tolerance=2, precision=0.001))
+  merged = _fracture(gdstk.boolean(grown, [], "or"))
+  return _fracture(gdstk.offset(merged, -offset, join='miter', tolerance=2, precision=0.001, use_union=True))
 
 
 def _shapely_polygons (geom):
@@ -567,14 +587,13 @@ def _best_island (shape, islands, tree):
   return best_index
 
 
-def _to_gdspy_points (polygon):
-  """shapely Polygon -> list of point arrays for gdspy, holes cut out with gdspy (keyholes)"""
+def _to_points (polygon):
+  """shapely Polygon -> list of point arrays, holes cut out with gdstk (keyholes)"""
   exterior = np.array(polygon.exterior.coords[:-1])
   if not polygon.interiors:
     return [exterior]
   holes = [np.array(ring.coords[:-1]) for ring in polygon.interiors]
-  result = gdspy.boolean([exterior], holes, "not", max_points=199)
-  return result.polygons if result is not None else []
+  return _fracture(gdstk.boolean([exterior], holes, "not"))
 
 
 def split_bridging_via_merges (merged, original_vias, above_islands, below_islands, maxspacing):
@@ -644,12 +663,10 @@ def split_bridging_via_merges (merged, original_vias, above_islands, below_islan
     clip = above_islands[above] if above >= 0 else below_islands[below]
     if above >= 0 and below >= 0:
       clip = clip.intersection(below_islands[below])
-    clip_points = [pts for poly in _shapely_polygons(clip) for pts in _to_gdspy_points(poly)]
+    clip_points = [pts for poly in _shapely_polygons(clip) for pts in _to_points(poly)]
     if not clip_points:
       continue
-    clipped = gdspy.boolean(merge_via_array(vias, maxspacing), clip_points, "and", max_points=199)
-    if clipped is not None:
-      result.extend(clipped.polygons)
+    result.extend(_fracture(gdstk.boolean(merge_via_array(vias, maxspacing), clip_points, "and")))
 
   return result, len(bridging), unmatched
 
@@ -676,7 +693,7 @@ def via_fill_factors (pieces, original_vias):
   fill_factors = []
   covered_total = 0.0
   for piece_pts in pieces:
-    piece = make_valid(ShapelyPolygon(piece_pts))  # gdspy keyhole rings can be invalid
+    piece = make_valid(ShapelyPolygon(piece_pts))  # keyhole rings can be invalid
     if piece.area <= 1e-9:
       fill_factors.append(1.0)
       continue
@@ -726,37 +743,37 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
   if os.path.isfile(filename):
     print('Reading GDSII input file:', filename)
   
-    input_library = gdspy.GdsLibrary(infile=filename)
+    input_library = gdstk.read_gds(filename)
 
     if preprocess: 
       # obsolete, cutouts are handles safely downstream after flattening
       print('Ignoring obsolete pre-processing setting, no longer required')
 
-    # evaluate only first top level cell
-    toplevel_cell_list = input_library.top_level()
-    
-    # try to get cell named cellname, otherwise top level cell
-    cell = input_library.cells.get(cellname, toplevel_cell_list[0])
+    # the cell named cellname, otherwise the design cell (largest top-level cell, not $$$CONTEXT_INFO$$$)
+    cell = select_design_cell(input_library, cellname)
     
     all_polygons = all_polygons_list()
 
-    # cache of raw gdspy polygon arrays per layer number (offset applied), used to compute derived layers
+    # cache of raw polygon arrays per layer number (offset applied), used to compute derived layers
     layer_polygons_gds = {}
 
     # metal islands per set of metal layer numbers, for via array merging (each metal is next to two via layers)
     metal_islands_cache = {}
 
-    # flatten hierarchy below this cell
-    cell.flatten(single_layer=None, single_datatype=None, single_texttype=None)
+    # flatten hierarchy below this cell, paths as polygons
+    flat_polygons = cell.get_polygons(include_paths=True)
 
     # optional mirror and translation of entire cell
-    for poly in cell.polygons:
+    for poly in flat_polygons:
       if mirror:
         # optional mirror
-        poly = poly.mirror(p1=[0,0],p2=[0,1])
+        poly.mirror((0, 0), (0, 1))
       if (offset_x != 0) or (offset_y != 0):
         # optional translation after mirror
-        poly = poly.translate(offset_x, offset_y)
+        poly.translate(offset_x, offset_y)
+
+    # polygons per layer-purpose pair
+    LPPpolylist = _polygons_by_spec(flat_polygons)
 
 
     # iterate over XML technology metal layers and (optional) dielectric layer boundary spec
@@ -770,7 +787,7 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
       # print ("Evaluating layer ", str(layer_to_extract))
 
       # get layers used in cell
-      used_layers = cell.get_layers()
+      used_layers = {layer for (layer, purpose) in LPPpolylist}
 
       # Note on layer numbers:
       # Used layer is the layer base number, layer_to_extract has the layer number offset from XML
@@ -780,10 +797,7 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
       layer_to_extract_gds = layer_to_extract - layernumber_offset
       if (layer_to_extract_gds in used_layers):  # use base layer number here to match GDSII
               
-        # iterate over layer-purpose pairs (by_spec=true)
-        # do not descend into cell references (depth=0)
-        LPPpolylist = cell.get_polygons(by_spec=True, depth=0)
-
+        # iterate over layer-purpose pairs
         for LPP in LPPpolylist:
           layer = LPP[0]   
           purpose = LPP[1]
@@ -826,7 +840,7 @@ def read_gds(filename, layerlist, purposelist, metals_list, preprocess=False, me
 
     # ----------- derived layers: boolean operations on other layers -----------
     if derived_layers is not None and len(derived_layers.derived_layers) > 0:
-      resolve_derived_layers(cell, derived_layers, layerlist, purposelist, layer_polygons_gds, layernumber_offset, all_polygons)
+      resolve_derived_layers(LPPpolylist, derived_layers, layerlist, purposelist, layer_polygons_gds, layernumber_offset, all_polygons)
 
     '''
     # Re-evaluate bounding box if we have a bounding box specified in GDS file and evaluation is requested

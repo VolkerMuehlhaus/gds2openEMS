@@ -2,6 +2,16 @@
 
 This is an (incomplete) list of changes and new features.
 
+## 18-Nov-2026 (0.8.0)
+
+**gdstk instead of gdspy:** the GDSII reader uses [gdstk](https://github.com/heitzmann/gdstk) instead of gdspy, which is no longer maintained and whose polygon fracturing could hang. `pip install gds2openEMS` installs gdstk. The results are the same: `read_gds()` on all GDS files shipped in `workflow/` and `more_examples/`, with and without via merging, gives every layer the same area as before. The mirror/offset options of `read_gds()` now also move paths; before, only polygons moved. The same port as gds2palace 0.11 and gds_prepare_for_EM 1.8.
+
+**Changed behaviour, the cell read without a cell name:** with `cellname=""` (or a name not in the file), `read_gds()` reads the design cell: the top-level cell with the largest bounding box, never KLayout's `$$$CONTEXT_INFO$$$`. Before, it read the first top-level cell, which depends on the order in the file. gds2palace, gds_prepare_for_EM, setupEM and the gds2palace MCP server use the same rule (`select_design_cell()`).
+
+**Fix, via array merging:** with `merge_polygon_size > 0`, merged vias no longer have strips cut out of them. A via array around an opening, e.g. a guard ring of contacts, came out cut open: shrinking back after merging opened the slit that encodes the hole, and, for large arrays, the lines along which the merged shape was split into pieces. The same for derived layers with a negative `Oversize`. Of the shipped layouts only `gsg_through_50ohm.gds` changes, by +0.003 % merged via area.
+
+**Fix, model files with decimal commas:** openEMS and CSXCAD write the numbers of the model file (`sub-<n>/<model>.xml`) and of the CSX file for the model hash in the number format of the C library. When the program had set a locale with decimal commas (Qt does that from `LANG`, e.g. a model script that opens a Qt matplotlib window first, with `LANG=de_DE`), the files got numbers like `endCriteria="0,0001"`, which the openEMS binary does not read as the number, and the model hash changed. The files are now always written with decimal points. The simulation started from Python was not affected: it does not read these files.
+
 ## 17-Nov-2026 (0.7.1)
 
 **Model file for the openEMS command line:** `sub-<n>/<model>.xml` is now the complete openEMS model, written with `FDTD.Write2XML()` (openEMS v0.37.0 and newer): besides geometry, mesh and ports, it has the excitation, the end criterion and the boundaries, so `openEMS <model>.xml` runs it without Python. Before, it held only the CSX (`CSX.Write2XML()`), which the openEMS program can't run. `runSimulation()` prints the command for each excitation, with the options the script passes to openEMS (`--engine`, `--gpu-device`, `--numThreads`, `--verbose`), since they are not part of the file. Nothing else changes: the simulation still starts from Python as before, and the hash that detects an unchanged model is still taken from the CSX alone, so existing results are not simulated again. With an older openEMS the file holds the CSX only, as before. Checked: the via port line run from the command line gives the same S-parameters as the run from the script.
