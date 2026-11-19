@@ -14,6 +14,7 @@ import pytest
 
 pytest.importorskip("openEMS")
 from test_full_xml import ENERGY_LIMIT, set_up_line  # noqa: E402
+from gds2openEMS import simulation_setup  # noqa: E402
 
 COMMA_LOCALES = ("de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8", "nl_NL.UTF-8")
 
@@ -24,17 +25,28 @@ def comma_locale():
     for name in COMMA_LOCALES:
         try:
             locale.setlocale(locale.LC_NUMERIC, name)
-            break
         except locale.Error:
             continue
+        # Windows accepts names like "de_DE.UTF-8" but may keep the decimal point: try the next one
+        if locale.localeconv()["decimal_point"] == ",":
+            break
     else:
+        locale.setlocale(locale.LC_NUMERIC, previous)
         pytest.skip("no locale with a decimal comma installed")
-    assert locale.localeconv()["decimal_point"] == ","
     yield name
     locale.setlocale(locale.LC_NUMERIC, previous)
 
 
 def test_model_file_has_decimal_points_with_a_comma_locale(tmp_path, monkeypatch, comma_locale):
+    # openEMS sets LC_NUMERIC itself in some builds (on Windows: en_US.UTF-8, in the openEMS() constructor), so
+    # the comma locale is set again right before the model is built, as when Qt sets it in a running program.
+    setup = simulation_setup.setupSimulation
+
+    def setup_with_comma_locale(*args, **kwargs):
+        locale.setlocale(locale.LC_NUMERIC, comma_locale)
+        return setup(*args, **kwargs)
+
+    monkeypatch.setattr(simulation_setup, "setupSimulation", setup_with_comma_locale)
     model_file, _ = set_up_line(tmp_path, monkeypatch, {'engine': 'cpu'})
     fdtd = ET.parse(model_file).getroot().find('FDTD')
     assert float(fdtd.get('endCriteria')) == pytest.approx(10 ** (ENERGY_LIMIT / 10))
