@@ -2,7 +2,7 @@
 
 This is an (incomplete) list of changes and new features.
 
-## 18-Nov-2026 (0.8.0)
+## 19-Nov-2026 (0.8.0)
 
 **gdstk instead of gdspy:** the GDSII reader uses [gdstk](https://github.com/heitzmann/gdstk) instead of gdspy, which is no longer maintained and whose polygon fracturing could hang. `pip install gds2openEMS` installs gdstk. The results are the same: `read_gds()` on all GDS files shipped in `workflow/` and `more_examples/`, with and without via merging, gives every layer the same area as before. The mirror/offset options of `read_gds()` now also move paths; before, only polygons moved. The same port as gds2palace 0.11 and gds_prepare_for_EM 1.8.
 
