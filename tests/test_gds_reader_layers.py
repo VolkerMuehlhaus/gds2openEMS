@@ -1,7 +1,7 @@
 """Tests for gds_reader.read_gds(): each GDS layer number is read once.
 
 Run: python -m pytest tests/test_gds_reader_layers.py
-Needs gdspy, numpy and pytest. The SG13G2 stackups use GDS layer 36 for two stackup layers (MIM and MIM_DK): one
+Needs gdstk, numpy and pytest. The SG13G2 stackups use GDS layer 36 for two stackup layers (MIM and MIM_DK): one
 drawn MIM shape makes the top plate and the dielectric below it. read_gds() read the layer once per stackup layer,
 so every MIM polygon came out twice (and openEMS warned about unused duplicate primitives).
 """
@@ -12,7 +12,7 @@ import sys
 import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-gdspy = pytest.importorskip("gdspy")
+gdstk = pytest.importorskip("gdstk")
 sys.path.insert(0, os.path.join(HERE, "..", "workflow"))
 
 from gds2openEMS import util_gds_reader as gds_reader  # noqa: E402
@@ -26,11 +26,11 @@ STACKUP = next(p for p in (os.path.join(HERE, "..", "XML_stackup", "legacy", "SG
 
 @pytest.fixture
 def layout(tmp_path):
-    lib = gdspy.GdsLibrary()
-    cell = lib.new_cell("TOP_" + tmp_path.name)       # gdspy keeps cell names globally: one per test
-    cell.add(gdspy.Rectangle((0, 0), (10, 10), layer=36))      # two MIM shapes
-    cell.add(gdspy.Rectangle((20, 0), (30, 10), layer=36))
-    cell.add(gdspy.Rectangle((-5, -5), (35, 15), layer=8))     # Metal1 below
+    lib = gdstk.Library()
+    cell = lib.new_cell("TOP")
+    cell.add(gdstk.rectangle((0, 0), (10, 10), layer=36))      # two MIM shapes
+    cell.add(gdstk.rectangle((20, 0), (30, 10), layer=36))
+    cell.add(gdstk.rectangle((-5, -5), (35, 15), layer=8))     # Metal1 below
     path = str(tmp_path / "mim.gds")
     lib.write_gds(path)
     return path
@@ -60,3 +60,22 @@ def test_boundary_layers_are_read_without_changing_the_list(layout):
     assert sum(1 for p in polygons.polygons if p.layernum == 36) == 2
     assert sum(1 for p in polygons.polygons if p.layernum == 8) == 1
     assert layerlist == [36, 36]
+
+
+def test_read_gds_takes_the_design_cell(tmp_path):
+    """Without a cell name: the largest top-level cell, not $$$CONTEXT_INFO$$$ or a small device cell placed nowhere,
+    whatever their order in the file (the same rule as gds2palace and gds_prepare_for_EM)."""
+    lib = gdstk.Library()
+    lib.new_cell("$$$CONTEXT_INFO$$$").add(gdstk.rectangle((0, 0), (1000, 1000), layer=1))
+    lib.new_cell("small_device").add(gdstk.rectangle((0, 0), (2, 2), layer=8))
+    lib.new_cell("DESIGN").add(gdstk.rectangle((0, 0), (50, 40), layer=8))
+    path = str(tmp_path / "multi.gds")
+    lib.write_gds(path)
+    library = gdstk.read_gds(path)
+    assert library.top_level()[0].name != "DESIGN"
+    assert gds_reader.select_design_cell(library).name == "DESIGN"
+    assert gds_reader.select_design_cell(library, "small_device").name == "small_device"
+    _, _, metals_list = stackup_reader.read_substrate(STACKUP)
+    polygons = gds_reader.read_gds(path, [8], purposelist=[0], metals_list=metals_list)
+    assert [p.layernum for p in polygons.polygons] == [8]
+    assert polygons.get_bounding_box() == pytest.approx((0, 50, 0, 40))

@@ -115,7 +115,7 @@ This is still fully supported — useful if you want to vendor a specific versio
 
 This workflow is based on the Python bindings for openEMS; please refer to <https://www.openems.de/> and <https://docs.openems.de/python/install.html#python-linux-install> for building/installing openEMS and CSXCAD themselves. Pre-built binaries are available for Windows, which is the easier path if you don't want to build from source; for Linux build issues, see the openEMS forum at <https://github.com/thliebig/openEMS-Project/discussions>.
 
-In addition to openEMS/CSXCAD, these Python modules must be installed: `gdspy`, `shapely`, `numpy`, `matplotlib`. `pip install gds2openEMS` declares `gdspy`, `CSXCAD`, `openEMS`, `numpy` and `shapely` as its own dependencies, and pip will attempt to pull them in. Note that openEMS/CSXCAD's native bindings are normally built from source rather than installed as an ordinary wheel — see the openEMS install docs linked above. `matplotlib` is only needed by the example scripts' own plotting code, not by the installed package itself.
+In addition to openEMS/CSXCAD, these Python modules must be installed: `gdstk`, `shapely`, `numpy`, `matplotlib`. `pip install gds2openEMS` declares `gdstk`, `CSXCAD`, `openEMS`, `numpy` and `shapely` as its own dependencies, and pip will attempt to pull them in. Note that openEMS/CSXCAD's native bindings are normally built from source rather than installed as an ordinary wheel — see the openEMS install docs linked above. `matplotlib` is only needed by the example scripts' own plotting code, not by the installed package itself.
 
 ## Model configuration syntax: settings{} dict vs. loose variables
 
